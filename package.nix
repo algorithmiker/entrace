@@ -14,6 +14,6 @@ rustPlatform.buildRustPackage {
   src = lib.cleanSource ./.;
   cargoHash = "sha256-3yLmsBJbptRBMkpB1Odt6WzIlCmMAgOVn03Ho6gzFO8=";
   meta = {
-    mainProgram = "entrace_gui";
+    mainProgram = "entrace";
   };
 }
