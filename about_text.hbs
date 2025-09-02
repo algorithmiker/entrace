@@ -1,0 +1,22 @@
+Third Party Licenses
+This document lists the licenses of the projects used in ENTRACE.
+Overview of licenses:
+{{#each overview}}
+	{{id}}: {{name}} ({{count}})
+{{/each}}
+Additionally, the ENTRACE gui depends on LuaJIT for search functionality.
+See https://github.com/LuaJIT/LuaJIT/blob/v2.1/COPYRIGHT for its license text.
+
+
+All license text:
+{{#each licenses}}
+    {{id}}: {{name}}
+    Used by:
+        {{#each used_by}}
+        {{crate.name}} ({{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}) {{crate.version}}
+        {{/each}}
+LICENSE TEXT for {{name}}: 
+================================================================================
+{{text}}
+================================================================================
+{{/each}}

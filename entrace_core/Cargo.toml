@@ -1,0 +1,29 @@
+[package]
+name = "entrace_core"
+description = "client library for ENTRACE, a modern log viewer and observability toolkit for Rust"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/algorithmiker/entrace"
+categories = ["development-tools::debugging"]
+[dependencies]
+bincode = { version = "2.0.1", features = ["serde"] }
+crossbeam = "0.8.4"
+derive_more = { version = "2.0.1", features = ["display"] }
+memmap2 = {version = "0.9.7", optional = true }
+mio = { version = "1.0.3", features = ["os-poll", "net"] }
+notify = {version = "8.1.0", optional = true }
+# free because tracing-subscriber already pulls it in
+nu-ansi-term = "0.50.1"
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.12"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[features]
+default = ["mmap", "notify-watch"]
+mmap = ["dep:memmap2"]
+notify-watch = ["dep:notify"]

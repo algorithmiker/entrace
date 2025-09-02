@@ -1,0 +1,49 @@
+- Convert
+	- support converting current trace (including remote)
+
+- Tree View
+	-	partial update on opens/closes
+
+- tests
+	- test IHT roundtrip with and without length prefix
+- general wishes
+	- non-global theme
+	- too many .unwrap()s
+	- system log
+
+- LOW PRIO
+	- toolbars for backends (idea: API for backend to add menu item AND/OR dialog via Tools->Remote, Tools->HT, Tools->IHT.)
+	- tab/window system
+	- low prio: benchmark channel::bounded(1) vs RwLock<Option> and similar
+	- HT backend: GC (safe) mode
+	- HT Backend: option to have the backend itself swap the out and temporary buffers (low prio)
+	- split out entrace_extras for LogProviders
+	- remote (IHT) backend
+		- maybe: Lock-based mode (very low prio)
+		- TLS for the streamed data (low prio)
+		- highlight new items (very low prio)
+	
+- DONE
+	- gate entrace_core dependencies behind features
+	- gui: query settings dialog doesn't get updated position after resizing window
+	- Docs: write docs
+	- root moves when opening it
+	- fix notifications
+	- self tracing broken
+	- locate sometimes fails to scroll
+	- make queries use the new tree-style spans (failed)
+	- typed span attributes
+	- Storage: remove init/finish from API
+	- new tree impl: "support" multi-lines (explicit newline):
+		- trace header
+		- attribute
+	- fix werid wrapping when scrolling right in new implementation
+	- HIGH PRIO: File IHT backend: fix for length-prefixed messages
+	- HIGH PRIO: iht_to_ht: fix for length-prefixed messages
+	- save trace setting in GUI
+	- better library api (PRERELEASE)
+	- watch IHT file for changes (high prio) (done)
+	- settings
+	- LogProvider: fallible everything
+	- flatten render tree (tried, failed)
+	- file converter dialog (.iht -> .ht) and reverse

@@ -1,0 +1,16 @@
+accepted = [
+    "Apache-2.0",
+    "MIT",
+		"Unicode-3.0",
+		"BSD-3-Clause",
+		"BSD-2-Clause",
+		"BSL-1.0",
+		"Ubuntu-font-1.0",
+		"OFL-1.1",
+		"Zlib",
+		"ISC",
+		"CC0-1.0",
+		"MPL-2.0",
+		"CDLA-Permissive-2.0"
+]
+no-clearly-defined = true

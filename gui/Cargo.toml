@@ -1,0 +1,40 @@
+[package]
+name = "entrace_gui"
+version = "0.1.0"
+edition = "2024"
+license = "(MIT OR Apache-2.0) AND OFL-1.1"
+
+[dependencies]
+anyhow = "1.0.98"
+bincode = { version = "2.0.1", features = ["serde"] }
+bitvec = "1.0.1"
+circular-buffer = "1.1.0"
+clap = { version = "4.5.40", features = ["derive"] }
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+directories = "6.0.0"
+eframe = "0.32.0"
+egui = "0.32.0"
+egui_extras = { version = "0.32.0", features = ["all_loaders"] }
+egui_material_icons = "0.4.0"
+entrace_core = { version = "0.1.0", path = "../entrace_core/" }
+memchr = "2.7.5"
+mimalloc = "0.1.47"
+mlua = { version = "0.10.5", features = ["error-send", "luajit"] }
+notify = "8.0.0"
+rfd = "0.15.4"
+thiserror = "2.0.12"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
+
+[dev-dependencies]
+divan = "0.1.21"
+bitvec = "1.0.1"
+rand = "0.9.1"
+
+[[bench]]
+name = "fused_bitvec"
+harness = false
+
+[[bin]]
+name = "entrace"
+path = "src/main.rs"

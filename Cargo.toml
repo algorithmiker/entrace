@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["example", "gui", "entrace_core"]
+
+[profile.profiling]
+inherits = 'release'
+debug = "line-tables-only"
+# Optimize all dependencies even in debug builds:
+[profile.dev.package."*"]
+opt-level = 2
