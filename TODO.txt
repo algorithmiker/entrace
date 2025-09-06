@@ -3,6 +3,12 @@
 
 - Tree View
 	-	partial update on opens/closes
+- Query
+	- "virtual span" for aggregate data
+- Cli
+	- new entrace_cli command
+	- provide a Lua environment with the standard query api
+	- convert traces via CLI
 
 - tests
 	- test IHT roundtrip with and without length prefix

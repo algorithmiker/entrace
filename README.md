@@ -98,6 +98,12 @@ Or alternatively,
 $ nix run github:algorithmiker/entrace
 ```
 
+## Demo trace
+- [example/scoreman.iet](./example/scoreman.iet) is a trace of [scoreman](https://github.com/algorithmiker/scoreman) parsing an example score.
+It is very nested, which makes for a nice demo.
+- Another way of demoing ENTRACE could be activating self-tracing (via Settings -> Save self-trace, and setting the level to Debug).
+After restarting ENTRACE, the current, live trace of the running application can be opened via Settings -> Open self-trace.
+
 ## Performance
 ENTRACE was designed with performance in mind, but did not receive much manual optimization yet.
 
