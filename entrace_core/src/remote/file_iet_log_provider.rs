@@ -164,6 +164,7 @@ impl FileIETError {
     pub fn is_fatal(&self) -> bool {
         match self {
             FileIETError::NeedNotify => true,
+            #[cfg(feature = "notify-watch")]
             FileIETError::NotifyError(_) => false,
             FileIETError::NoMoreRetries(_) => true,
         }
