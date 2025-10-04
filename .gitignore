@@ -5,3 +5,4 @@
 *.iet
 **/**.et
 .direnv
+result
