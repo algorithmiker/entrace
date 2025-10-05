@@ -45,3 +45,28 @@ function query6()
 	end
 	return ids
 end
+
+function query7()
+	local r_start, r_end = en_span_range()
+	local ids = {}
+	for i = r_start, r_end do
+		local node_value = en_attr_by_name(i, "node_value")
+		if node_value and node_value >= "d3" then
+			table.insert(ids, i)
+		end
+	end
+	return ids
+end
+
+-- equivalent to query7(), but about 2x faster.
+function query8()
+	local r_start, r_end = en_span_range()
+
+	filter_settings = {
+		target = "node_value",
+		relation = "GT",
+		value = "d3",
+	}
+	filtered = en_filter_range(r_start, r_end, filter_settings)
+	return filtered
+end

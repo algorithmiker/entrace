@@ -1,14 +1,16 @@
 use std::{
     cell::RefCell,
+    cmp::Ordering,
     collections::HashMap,
     ops::RangeInclusive,
     rc::Rc,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock, RwLockReadGuard},
 };
 
-use entrace_core::{EnValueRef, LogProviderError, MetadataRefContainer};
+use anyhow::bail;
+use entrace_core::{EnValue, EnValueRef, LogProviderError, MetadataRefContainer};
 use memchr::memmem::Finder;
-use mlua::{IntoLua, Lua, Table, Value};
+use mlua::{ExternalError, IntoLua, Lua, Table, Value};
 
 use crate::{
     LevelRepr, TraceProvider,
@@ -280,6 +282,178 @@ pub fn en_contains_anywhere(
     }
 }
 
+fn meta_matches(
+    meta: &MetadataRefContainer, target: &str, comparator: Ordering, value: &EnValue,
+) -> anyhow::Result<bool> {
+    fn string_eq(a: &str, value: &EnValue, comparator: std::cmp::Ordering) -> bool {
+        match value {
+            EnValue::String(b) => a.cmp(b) == comparator,
+            _ => false,
+        }
+    }
+    fn opt_string_eq(a: Option<&str>, value: &EnValue, comparator: Ordering) -> bool {
+        let Some(a) = a else { return false };
+        match value {
+            EnValue::String(b) => a.cmp(b) == comparator,
+            _ => false,
+        }
+    }
+    match target {
+        "name" => Ok(string_eq(meta.name, value, comparator)),
+        "target" => Ok(string_eq(meta.target, value, comparator)),
+        "level" => {
+            let asu8 = match value {
+                EnValue::U64(x) => *x as u8,
+                EnValue::I64(x) => *x as u8,
+                _ => return Ok(false),
+            };
+            Ok((meta.level as u8).cmp(&asu8) == comparator)
+        }
+        "module_path" => Ok(opt_string_eq(meta.module_path, value, comparator)),
+        "file" => Ok(opt_string_eq(meta.file, value, comparator)),
+        "line" => {
+            let converted = match value {
+                EnValue::Float(a) => *a as u32,
+                EnValue::U64(a) => *a as u32,
+                EnValue::I64(a) => *a as u32,
+                _ => return Ok(false),
+            };
+            let Some(line) = meta.line else { return Ok(false) };
+            Ok(line.cmp(&converted) == comparator)
+        }
+        x => bail!("Bad meta field {x}"),
+    }
+}
+
+fn values_match(comparator: std::cmp::Ordering, span_value: &EnValueRef, value: &EnValue) -> bool {
+    match value {
+        EnValue::String(a) => match span_value {
+            EnValueRef::String(b) => b.cmp(&a.as_str()) == comparator,
+            _ => false,
+        },
+        EnValue::Bool(a) => match span_value {
+            EnValueRef::Bool(b) => b.cmp(a) == comparator,
+            _ => false,
+        },
+        EnValue::Float(a) => match span_value {
+            EnValueRef::Float(b) => b.total_cmp(a) == comparator,
+            _ => false,
+        },
+        EnValue::U64(a) => {
+            let span_value_converted = match span_value {
+                EnValueRef::U64(x) => *x,
+                EnValueRef::I64(x) => *x as u64,
+                EnValueRef::U128(x) => *x as u64,
+                EnValueRef::I128(x) => *x as u64,
+                _ => return false,
+            };
+            span_value_converted.cmp(a) == comparator
+        }
+        EnValue::I64(a) => {
+            let span_value_converted = match span_value {
+                EnValueRef::U64(x) => *x as i64,
+                EnValueRef::I64(x) => *x,
+                EnValueRef::U128(x) => *x as i64,
+                EnValueRef::I128(x) => *x as i64,
+                _ => return false,
+            };
+            span_value_converted.cmp(a) == comparator
+        }
+        // we explicitly don't construct these
+        EnValue::U128(_) => false,
+        EnValue::I128(_) => false,
+        // table->bytes is not handled for now
+        EnValue::Bytes(_) => false,
+    }
+}
+
+pub fn filter_inner(
+    tcc: RwLockReadGuard<TraceProvider>, ids: impl Iterator<Item = u32>, target: &str,
+    target_is_meta: bool, relation: Ordering, en_value: EnValue,
+) -> mlua::Result<Vec<u32>> {
+    let mut returned = Vec::with_capacity(128);
+    for id in ids {
+        if target_is_meta {
+            let meta = tcc.meta(id).unwrap();
+            let matches_here =
+                meta_matches(&meta, target, relation, &en_value).map_err(|x| x.into_lua_err())?;
+            if matches_here {
+                returned.push(id);
+            }
+        } else {
+            let attrs = tcc.attrs(id).unwrap();
+            let Some((_name, target_here)) = attrs.iter().find(|(name, _)| *name == target) else {
+                continue;
+            };
+            let matches_here = values_match(relation, target_here, &en_value);
+            if matches_here {
+                returned.push(id);
+            }
+        }
+    }
+    Ok(returned)
+}
+
+fn parse_filter_desc(desc: mlua::Table) -> mlua::Result<(String, bool, Ordering, EnValue)> {
+    use anyhow::anyhow;
+    let Ok(raw_target): mlua::Result<String> = desc.get("target") else {
+        return Err(anyhow!("Filter target must be a string").into_lua_err());
+    };
+    let mut target: &str = raw_target.as_str();
+    let mut target_is_meta = false;
+    if let Some(stripped) = raw_target.strip_prefix("meta.") {
+        target = stripped;
+        target_is_meta = true;
+    }
+    let Ok(rel): mlua::Result<String> = desc.get("relation") else {
+        return Err(anyhow!("Filter relation must be a string").into_lua_err());
+    };
+    let relation = match rel.as_str() {
+        "GT" => Ordering::Greater,
+        "LT" => Ordering::Less,
+        "EQ" => Ordering::Equal,
+        x => return Err(anyhow::anyhow!("Bad filter relation {x}").into_lua_err()),
+    };
+
+    let value: Value = desc.get("value").unwrap();
+    let en_value = match value {
+        Value::Boolean(f) => EnValue::Bool(f),
+        Value::Integer(k) => EnValue::I64(k),
+        Value::Number(z) => EnValue::Float(z),
+        Value::String(ref q) => EnValue::String(q.to_string_lossy()),
+        x => {
+            return Err(anyhow!("Cannot convert value {x:?} to EnValue").into_lua_err());
+        }
+    };
+    Ok((target.into(), target_is_meta, relation, en_value))
+}
+
+/// en_filter(list<id>, compare_desc)
+/// where compare_desc is a table:
+///   target: name of variable eg. "message" or "meta.filename"
+///   relation: a relation, one of "EQ", "LT", "GT"
+///   value: a constant to compare with
+/// Returns the ids of the spans matching the compare_desc.
+pub fn en_filter(
+    trace_provider: Arc<RwLock<TraceProvider>>,
+) -> impl Fn(&Lua, (Vec<u32>, Table)) -> mlua::Result<Vec<u32>> {
+    move |_lua: &Lua, (ids, desc): (Vec<u32>, Table)| {
+        let tcc = trace_provider.read().unwrap();
+        let (target, target_is_meta, relation, en_value) = parse_filter_desc(desc)?;
+        filter_inner(tcc, ids.iter().copied(), &target, target_is_meta, relation, en_value)
+    }
+}
+/// Same as en_filter, but accets a range start and range end instead
+pub fn en_filter_range(
+    trace_provider: Arc<RwLock<TraceProvider>>,
+) -> impl Fn(&Lua, (u32, u32, Table)) -> mlua::Result<Vec<u32>> {
+    move |_lua: &Lua, (start, end, desc): (u32, u32, Table)| {
+        let tcc = trace_provider.read().unwrap();
+        let (target, target_is_meta, relation, en_value) = parse_filter_desc(desc)?;
+        filter_inner(tcc, start..=end, &target, target_is_meta, relation, en_value)
+    }
+}
+
 pub fn setup_lua(
     lua: &mut Lua, range: RangeInclusive<u32>, trace: Arc<RwLock<TraceProvider>>,
     finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>,
@@ -314,6 +488,8 @@ pub fn setup_lua(
         "en_contains_anywhere",
         lua.create_function(en_contains_anywhere(trace.clone(), fc))?,
     )?;
+    globals.set("en_filter", lua.create_function(en_filter(trace.clone()))?)?;
+    globals.set("en_filter_range", lua.create_function(en_filter_range(trace.clone()))?)?;
 
     Ok(())
 }
