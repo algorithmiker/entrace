@@ -43,7 +43,7 @@ pub trait FileLike: Read + Write + Seek {}
 impl<T: Read + Write + Seek> FileLike for T {}
 pub type ETResult<A, T> = Result<A, ETStorageError<T>>;
 pub struct ETStorage<T: FileLike, Q: FileLike + Send> {
-    pub sender: crossbeam::channel::Sender<Message<Q>>,
+    pub sender: crossbeam_channel::Sender<Message<Q>>,
     pub thread_handle: RwLock<Option<JoinHandle<ETResult<ETShutdownValue<T, Q>, T>>>>,
 }
 impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q> {
@@ -51,7 +51,7 @@ impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q>
     where
         Self: std::marker::Sized,
     {
-        let (tx, rx) = crossbeam::channel::unbounded::<Message<Q>>();
+        let (tx, rx) = crossbeam_channel::unbounded::<Message<Q>>();
         let thread_handle = std::thread::spawn(move || {
             let magic = entrace_magic_for(1, crate::StorageFormat::IET);
             file.write_all(&magic).unwrap();

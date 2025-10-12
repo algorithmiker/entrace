@@ -1,11 +1,11 @@
-use std::{thread::JoinHandle, time::Duration};
+use std::{fmt::Display, thread::JoinHandle, time::Duration};
 
 use crate::{
     Header, IETPresentationConfig, LevelContainer, MetadataRefContainer, PoolEntry, TraceEntry,
     log_provider::{LogProvider, LogProviderError, LogProviderResult},
     tree_layer::EnValueRef,
 };
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender};
 
 mod file_iet_log_provider;
 pub use file_iet_log_provider::*;
@@ -14,15 +14,21 @@ pub use remote_storage::*;
 mod remote_log_provider;
 pub use remote_log_provider::*;
 
-#[derive(derive_more::Display)]
 pub enum IETInfo {
-    #[display("Server started, waiting for connections")]
     ServerStarted,
-    #[display("Received connection")]
     ReceivedConnection,
-    #[display("Remote client closed connection")]
     RemoteClosedConnection,
 }
+impl Display for IETInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IETInfo::ServerStarted => write!(f, "Server started, waiting for connections"),
+            IETInfo::ReceivedConnection => write!(f, "Received connection"),
+            IETInfo::RemoteClosedConnection => write!(f, "Remote client closed connection"),
+        }
+    }
+}
+
 pub enum IETEvent {
     Error(LogProviderError),
     Info(IETInfo),
@@ -55,7 +61,7 @@ impl BaseIETLogProvider {
         // Notifier: Notify + Send + 'static,
         // Refresher: Refresh + Send + 'static,
     {
-        let (tx, rx) = crossbeam::channel::unbounded();
+        let (tx, rx) = crossbeam_channel::unbounded();
         let handle = std::thread::spawn(move || worker_thread(buf, tx, config));
         // no root data entry here, the client has to send it.
         Self { handle, receiver: rx, pool: vec![], data: vec![] }
@@ -134,8 +140,8 @@ impl LogProvider for BaseIETLogProvider {
                     }
                 }
                 Err(y) => match y {
-                    crossbeam::channel::TryRecvError::Empty => (),
-                    crossbeam::channel::TryRecvError::Disconnected => (),
+                    crossbeam_channel::TryRecvError::Empty => (),
+                    crossbeam_channel::TryRecvError::Disconnected => (),
                 },
             }
         }

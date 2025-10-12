@@ -238,7 +238,7 @@ impl Default for IETLoadConfig {
 }
 
 pub struct IETPresentationConfig<R: Refresh = DummyRefresher> {
-    pub event_tx: Option<crossbeam::channel::Sender<IETEvent>>,
+    pub event_tx: Option<crossbeam_channel::Sender<IETEvent>>,
     pub refresher: R,
 }
 impl Default for IETPresentationConfig {
@@ -247,7 +247,7 @@ impl Default for IETPresentationConfig {
     }
 }
 impl<R: Refresh> IETPresentationConfig<R> {
-    pub fn new(event_tx: Option<crossbeam::channel::Sender<IETEvent>>, refresher: R) -> Self {
+    pub fn new(event_tx: Option<crossbeam_channel::Sender<IETEvent>>, refresher: R) -> Self {
         Self { event_tx, refresher }
     }
 }

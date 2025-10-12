@@ -13,7 +13,7 @@ use crate::{
     log_provider::{LogProvider, LogProviderResult},
     remote::{BaseIETLogProvider, MainThreadMessage, Refresh},
 };
-use crossbeam::channel::Sender;
+use crossbeam_channel::Sender;
 
 enum ReadState {
     WantMagic,
@@ -21,7 +21,7 @@ enum ReadState {
 }
 
 struct RemoteWorkerState<'a, R: Refresh> {
-    event_tx: Option<crossbeam::channel::Sender<IETEvent>>,
+    event_tx: Option<crossbeam_channel::Sender<IETEvent>>,
     refresher: R,
     reader: BufReader<&'a mut TcpStream>,
     tx: Sender<MainThreadMessage>,
@@ -31,7 +31,7 @@ struct RemoteWorkerState<'a, R: Refresh> {
 }
 impl<'a, R: Refresh> RemoteWorkerState<'a, R> {
     pub fn new(
-        event_tx: Option<crossbeam::channel::Sender<IETEvent>>, refresher: R,
+        event_tx: Option<crossbeam_channel::Sender<IETEvent>>, refresher: R,
         reader: BufReader<&'a mut TcpStream>, tx: Sender<MainThreadMessage>, read_state: ReadState,
     ) -> RemoteWorkerState<'a, R> {
         Self {

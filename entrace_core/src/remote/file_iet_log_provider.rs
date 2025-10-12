@@ -11,7 +11,7 @@ use std::{
 };
 
 use bincode::error::DecodeError;
-use crossbeam::channel::Sender;
+use crossbeam_channel::Sender;
 use tracing::trace;
 use tracing::{error, info};
 
@@ -139,7 +139,7 @@ impl FileIETLogProvider {
                     {
                         if let Some(etx) = &config2.event_tx {
                             use crate::remote::IETEvent;
-                            etx.send(IETEvent::Error(FileIETError::NeedNotify.into()));
+                            etx.send(IETEvent::Error(FileIETError::NeedNotify.into())).ok();
                         }
                         return;
                     }

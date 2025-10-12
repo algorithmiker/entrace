@@ -1,5 +1,5 @@
 use crate::{StorageFormat, TraceEntry, entrace_magic_for, storage::Storage, tree_layer::EnValue};
-use crossbeam::channel::{SendError, Sender};
+use crossbeam_channel::{SendError, Sender};
 use std::{any::Any, io::Write, sync::RwLock, thread::JoinHandle};
 
 pub enum RemoteMessage {
@@ -40,7 +40,7 @@ pub struct IETStorage<T: Write + Send + 'static> {
 }
 impl<T: Write + Send + 'static> IETStorage<T> {
     pub fn init(mut config: IETStorageConfig<T>) -> Self {
-        let (tx, rx) = crossbeam::channel::unbounded();
+        let (tx, rx) = crossbeam_channel::unbounded();
         let format =
             if config.length_prefixed { StorageFormat::IETPrefix } else { StorageFormat::IET };
         let thread_handle = std::thread::spawn(move || {
