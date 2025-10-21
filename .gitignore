@@ -6,3 +6,4 @@
 **/**.et
 .direnv
 result
+.bench
