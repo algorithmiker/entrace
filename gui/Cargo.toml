@@ -17,6 +17,7 @@ egui = "0.32.0"
 egui_extras = { version = "0.32.0", features = ["all_loaders"] }
 egui_material_icons = "0.4.0"
 entrace_core = { version = "0.1.1", path = "../entrace_core/" }
+entrace_query = { version = "0.1.1", path = "../entrace_query/" }
 memchr = "2.7.5"
 mimalloc = "0.1.47"
 mlua = { version = "0.10.5", features = ["error-send", "luajit"] }

@@ -8,15 +8,23 @@ use std::{
 };
 
 use anyhow::bail;
-use entrace_core::{EnValue, EnValueRef, LogProviderError, MetadataRefContainer};
+use entrace_core::{EnValue, EnValueRef, LevelContainer, LogProviderError, MetadataRefContainer};
 use memchr::memmem::Finder;
 use mlua::{ExternalError, IntoLua, Lua, Table, Value};
 
 use crate::{
-    LevelRepr, TraceProvider,
-    search::{LuaValueRef, LuaValueRefRef, QueryError},
+    QueryError, TraceProvider,
+    lua_value::{LuaValueRef, LuaValueRefRef},
 };
-
+fn level_to_u8(level: &entrace_core::LevelContainer) -> u8 {
+    match level {
+        LevelContainer::Trace => 1,
+        LevelContainer::Debug => 2,
+        LevelContainer::Info => 3,
+        LevelContainer::Warn => 4,
+        LevelContainer::Error => 5,
+    }
+}
 fn make_oob_error(index: u32, len: usize) -> mlua::Error {
     let actual = len as u32;
     let e = QueryError::OutOfBounds { index, actual };
@@ -70,7 +78,7 @@ pub fn en_metadata(
 
         let table = lua.create_table()?;
         table.set("name", name)?;
-        table.set("level", level.index())?;
+        table.set("level", level_to_u8(&level))?;
         table.set("file", file)?;
         table.set("line", line)?;
         table.set("target", target)?;
@@ -97,7 +105,7 @@ pub fn en_metadata_level(
         let tcc = trace_provider.read().unwrap();
         let c = tcc.meta(id).map_err(to_lua_error)?;
         let MetadataRefContainer { level, .. } = c;
-        Ok(level.index())
+        Ok(level_to_u8(&level))
     }
 }
 

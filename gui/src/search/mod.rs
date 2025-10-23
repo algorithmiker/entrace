@@ -1,6 +1,3 @@
-pub mod lua_api;
-mod lua_value;
-pub use lua_value::*;
 pub mod query_window;
 use std::{
     cell::RefCell,
@@ -14,18 +11,15 @@ use std::{
 };
 
 use crate::{
-    LogState, TraceProvider,
-    enbitvec::EnBitVec,
-    notifications::draw_x,
-    rect,
-    search::{lua_api::setup_lua, query_window::QueryLayoutCache},
-    spawn_task,
+    LogState, TraceProvider, enbitvec::EnBitVec, notifications::draw_x, rect,
+    search::query_window::QueryLayoutCache, spawn_task,
 };
 use crossbeam::channel::Receiver;
 use egui::{
     Color32, CornerRadius, Margin, Pos2, Rect, Response, RichText, Sense, Separator, Shape, Stroke,
     TextEdit, Ui, epaint::RectShape, pos2, vec2,
 };
+use entrace_query::lua_api::setup_lua;
 use mlua::{FromLua, Lua, Value};
 use tracing::{error, info};
 #[derive(Debug, Clone)]
