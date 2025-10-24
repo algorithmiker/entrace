@@ -281,8 +281,6 @@ fn span(
         info!("Right-clicked {id}");
     }
     header_res.header_response.context_menu(|ui| {
-        if ui.button("Pop out").clicked() {};
-
         #[allow(irrefutable_let_patterns)]
         if let SpanContext::QueryResults { locating_state, trace_provider } = ctx {
             let enabled = locating_state.borrow().can_start_new();

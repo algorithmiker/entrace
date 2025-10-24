@@ -11,15 +11,15 @@ use std::{
 };
 
 use crate::{
-    LogState, TraceProvider, enbitvec::EnBitVec, notifications::draw_x, rect,
-    search::query_window::QueryLayoutCache, spawn_task,
+    LogState, TraceProvider, notifications::draw_x, rect, search::query_window::PaginatedResults,
+    spawn_task,
 };
 use crossbeam::channel::Receiver;
 use egui::{
     Color32, CornerRadius, Margin, Pos2, Rect, Response, RichText, Sense, Separator, Shape, Stroke,
     TextEdit, Ui, epaint::RectShape, pos2, vec2,
 };
-use entrace_query::lua_api::setup_lua_on_arc_rwlock;
+use entrace_query::{QueryError, lua_api::setup_lua_on_arc_rwlock};
 use mlua::{FromLua, Lua, Value};
 use tracing::{error, info};
 #[derive(Debug, Clone)]
@@ -30,8 +30,7 @@ pub struct PartialQueryResult {
 #[derive(Debug)]
 pub struct QueryResult {
     pub ids: Vec<u32>,
-    pub layout_cache: QueryLayoutCache,
-    cull_open_state: EnBitVec,
+    pub pages: PaginatedResults,
 }
 #[derive(Debug)]
 pub enum Query {
@@ -200,12 +199,7 @@ impl SearchState {
                 }
             }
             let ids_len = total_ids.len();
-            let cull_open_state = EnBitVec::repeat(false, ids_len);
-            let qr = QueryResult {
-                ids: total_ids,
-                cull_open_state,
-                layout_cache: QueryLayoutCache::new(),
-            };
+            let qr = QueryResult { ids: total_ids, pages: PaginatedResults::new(ids_len) };
             tx.send(Ok(qr)).ok();
         });
     }
