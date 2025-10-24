@@ -80,6 +80,10 @@
             pname = "entrace_core_lite";
             cargoExtraArgs = "-p entrace_core --no-default-features";
           };
+          entrace_script = craneWithCommonArgs {
+            pname = "entrace-script";
+            cargoExtraArgs = "-p entrace_script";
+          };
         };
       }
     );

@@ -19,7 +19,7 @@ use egui::{
     Color32, CornerRadius, Margin, Pos2, Rect, Response, RichText, Sense, Separator, Shape, Stroke,
     TextEdit, Ui, epaint::RectShape, pos2, vec2,
 };
-use entrace_query::lua_api::setup_lua;
+use entrace_query::lua_api::setup_lua_on_arc_rwlock;
 use mlua::{FromLua, Lua, Value};
 use tracing::{error, info};
 #[derive(Debug, Clone)]
@@ -153,7 +153,9 @@ impl SearchState {
                     f.spawn(move || {
                         let finder_cache = Rc::new(RefCell::new(HashMap::new()));
                         let mut lua = Lua::new();
-                        if let Err(y) = setup_lua(&mut lua, range, trace_provider, finder_cache) {
+                        if let Err(y) =
+                            setup_lua_on_arc_rwlock(&mut lua, range, trace_provider, finder_cache)
+                        {
                             let mut rw = results2.write().unwrap();
                             rw[i as usize] = Some(Err(QueryError::LuaError(y)));
                         }

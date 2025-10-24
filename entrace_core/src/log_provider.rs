@@ -1,5 +1,3 @@
-use std::{ops::Deref, sync::Arc};
-
 use crate::{
     Header, MetadataRefContainer,
     remote::{FileIETError, RemoteLogProviderError},

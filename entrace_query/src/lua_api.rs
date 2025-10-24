@@ -2,13 +2,17 @@ use std::{
     cell::RefCell,
     cmp::Ordering,
     collections::HashMap,
+    error::Error,
     ops::RangeInclusive,
     rc::Rc,
-    sync::{Arc, RwLock, RwLockReadGuard},
+    sync::{Arc, RwLock},
 };
 
 use anyhow::bail;
-use entrace_core::{EnValue, EnValueRef, LevelContainer, LogProviderError, MetadataRefContainer};
+use entrace_core::{
+    EnValue, EnValueRef, LevelContainer, LogProvider, LogProviderError, LogProviderResult,
+    MetadataRefContainer,
+};
 use memchr::memmem::Finder;
 use mlua::{ExternalError, IntoLua, Lua, Table, Value};
 
@@ -31,8 +35,8 @@ fn make_oob_error(index: u32, len: usize) -> mlua::Error {
     mlua::Error::ExternalError(Arc::new(e))
 }
 
-fn to_lua_error(x: LogProviderError) -> mlua::Error {
-    mlua::Error::ExternalError(Arc::new(x))
+fn to_lua_err(x: impl Error + Send + Sync + 'static) -> mlua::Error {
+    x.into_lua_err()
 }
 
 pub fn en_span_range(range: &RangeInclusive<u32>) -> mlua::Result<(u32, u32)> {
@@ -43,37 +47,21 @@ pub fn en_log(x: mlua::Value) -> mlua::Result<()> {
     Ok(())
 }
 
-pub fn en_children(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Vec<u32>> {
-    move |_lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.children(id).map_err(to_lua_error)?;
-        Ok(c.to_vec())
-    }
-}
-pub fn en_child_cnt(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<usize> {
-    move |_lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.children(id).map_err(to_lua_error)?;
-        Ok(c.len())
-    }
+pub fn en_children(tcc: &impl LogProvider) -> impl Fn(u32) -> Result<Vec<u32>, LogProviderError> {
+    move |id: u32| tcc.children(id).map(|x| x.into())
 }
 
-pub fn en_span_cnt(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, ()) -> mlua::Result<usize> {
-    move |_lua: &Lua, _: ()| Ok(trace_provider.read().unwrap().len())
+pub fn en_child_cnt(tcc: &impl LogProvider) -> impl Fn(u32) -> Result<usize, LogProviderError> {
+    move |id: u32| Ok(tcc.children(id)?.len())
 }
 
-pub fn en_metadata(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Table> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.meta(id).map_err(to_lua_error)?;
+pub fn en_span_cnt(tcc: &impl LogProvider) -> impl Fn(()) -> mlua::Result<usize> {
+    move |_: ()| Ok(tcc.len())
+}
+
+pub fn en_metadata_table(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> mlua::Result<Table> {
+    move |id: u32| {
+        let c = tcc.meta(id).map_err(to_lua_err)?;
         let MetadataRefContainer { name, level, file, line, target, module_path } = c;
 
         let table = lua.create_table()?;
@@ -88,77 +76,52 @@ pub fn en_metadata(
 }
 
 pub fn en_metadata_name(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<String> {
-    move |_lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.meta(id).map_err(to_lua_error)?;
-        let MetadataRefContainer { name, .. } = c;
-        Ok(name.to_string())
-    }
+    tcc: &impl LogProvider,
+) -> impl Fn(u32) -> Result<String, LogProviderError> {
+    move |id: u32| Ok(tcc.meta(id)?.name.to_string())
 }
 
-pub fn en_metadata_level(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<u8> {
-    move |_lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.meta(id).map_err(to_lua_error)?;
-        let MetadataRefContainer { level, .. } = c;
-        Ok(level_to_u8(&level))
+pub fn en_metadata_level(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult<u8> {
+    move |id: u32| {
+        let c = tcc.meta(id)?;
+        Ok(level_to_u8(&c.level))
     }
 }
 
 pub fn en_metadata_file(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Option<Value>> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.meta(id).map_err(to_lua_error)?;
-        let MetadataRefContainer { file, .. } = c;
-        let filef = file.map(|x| x.into_lua(lua).unwrap());
-        Ok(filef)
+    tcc: &impl LogProvider,
+) -> impl Fn(u32) -> LogProviderResult<Option<String>> {
+    move |id: u32| {
+        let c = tcc.meta(id)?;
+        Ok(c.file.map(|x| x.to_owned()))
     }
 }
-pub fn en_metadata_line(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Option<Value>> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.meta(id).map_err(to_lua_error)?;
-        let MetadataRefContainer { line, .. } = c;
-        Ok(line.map(|x| x.into_lua(lua).unwrap()))
+pub fn en_metadata_line(tcc: &impl LogProvider) -> impl Fn(u32) -> mlua::Result<Option<u32>> {
+    move |id: u32| {
+        let c = tcc.meta(id).map_err(to_lua_err)?;
+        Ok(c.line)
     }
 }
 
-pub fn en_metadata_target(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<String> {
-    move |_lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.meta(id).map_err(to_lua_error)?;
-        let MetadataRefContainer { target, .. } = c;
-        Ok(target.to_string())
+pub fn en_metadata_target(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult<String> {
+    move |id: u32| {
+        let c = tcc.meta(id)?;
+        Ok(c.target.to_string())
     }
 }
 
 pub fn en_metadata_module_path(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Option<mlua::Value>> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.meta(id).map_err(to_lua_error)?;
-        let MetadataRefContainer { module_path, .. } = c;
-        Ok(module_path.map(|x| x.into_lua(lua).unwrap()))
+    tcc: &impl LogProvider,
+) -> impl Fn(u32) -> LogProviderResult<Option<String>> {
+    move |id: u32| {
+        let c = tcc.meta(id)?;
+        Ok(c.module_path.map(|x| x.to_string()))
     }
 }
 
-pub fn en_attrs(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Table> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.attrs(id).map_err(to_lua_error)?;
+pub fn en_attrs(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> mlua::Result<Table> {
+    move |id: u32| {
+        let c = tcc.attrs(id).map_err(to_lua_err)?;
         let table = lua.create_table_with_capacity(0, c.len())?;
         for (key, value) in c {
             table.set(key, LuaValueRef(value))?;
@@ -168,11 +131,10 @@ pub fn en_attrs(
 }
 
 pub fn en_attr_names(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Vec<Value>> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.attrs(id).map_err(to_lua_error)?;
+    tcc: &impl LogProvider, lua: &Lua,
+) -> impl Fn(u32) -> mlua::Result<Vec<Value>> {
+    move |id: u32| {
+        let c = tcc.attrs(id).map_err(to_lua_err)?;
         let mut names = Vec::with_capacity(c.len());
         for (key, _) in c {
             names.push(key.into_lua(lua)?);
@@ -182,11 +144,10 @@ pub fn en_attr_names(
 }
 
 pub fn en_attr_values(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<Vec<Value>> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.attrs(id).map_err(to_lua_error)?;
+    tcc: &impl LogProvider, lua: &Lua,
+) -> impl Fn(u32) -> mlua::Result<Vec<Value>> {
+    move |id: u32| {
+        let c = tcc.attrs(id).map_err(to_lua_err)?;
         let mut values = Vec::with_capacity(c.len());
         for (_, value) in c {
             values.push(LuaValueRef(value).into_lua(lua)?);
@@ -196,57 +157,50 @@ pub fn en_attr_values(
 }
 
 pub fn en_attr_by_idx(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, (u32, usize)) -> mlua::Result<(mlua::String, mlua::Value)> {
-    move |lua: &Lua, (id, idx): (u32, usize)| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.attrs(id).map_err(to_lua_error)?;
+    tcc: &impl LogProvider, lua: &Lua,
+) -> impl Fn((u32, usize)) -> mlua::Result<(mlua::String, mlua::Value)> {
+    move |(id, idx): (u32, usize)| {
+        let c = tcc.attrs(id).map_err(to_lua_err)?;
         let (k, v) = c.get(idx).ok_or_else(|| make_oob_error(idx as u32, c.len()))?;
         Ok((lua.create_string(k)?, LuaValueRefRef(v).into_lua(lua)?))
     }
 }
 
 pub fn en_attr_by_name(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, (u32, String)) -> mlua::Result<mlua::Value> {
-    move |lua: &Lua, (id, key): (u32, String)| {
-        let tcc = trace_provider.read().unwrap();
-        let attrs = tcc.attrs(id).map_err(to_lua_error)?;
+    tcc: &impl LogProvider, lua: &Lua,
+) -> impl Fn((u32, String)) -> mlua::Result<mlua::Value> {
+    move |(id, key): (u32, String)| {
+        let attrs = tcc.attrs(id).map_err(to_lua_err)?;
         let attr = attrs.iter().find(|(k, _)| *k == key);
         if let Some(attr) = attr { LuaValueRefRef(&attr.1).into_lua(lua) } else { Ok(mlua::Nil) }
     }
 }
 
 pub fn en_attr_name(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, (u32, usize)) -> mlua::Result<mlua::String> {
-    move |lua: &Lua, (id, idx): (u32, usize)| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.attrs(id).map_err(to_lua_error)?;
+    tcc: &impl LogProvider, lua: &Lua,
+) -> impl Fn((u32, usize)) -> mlua::Result<mlua::String> {
+    move |(id, idx): (u32, usize)| {
+        let c = tcc.attrs(id).map_err(to_lua_err)?;
         let (k, _) = c.get(idx).ok_or_else(|| make_oob_error(idx as u32, c.len()))?;
         lua.create_string(k)
     }
 }
 
 pub fn en_attr_value(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, (u32, usize)) -> mlua::Result<mlua::Value> {
-    move |lua: &Lua, (id, idx): (u32, usize)| {
-        let tcc = trace_provider.read().unwrap();
-        let c = tcc.attrs(id).map_err(to_lua_error)?;
+    tcc: &impl LogProvider, lua: &Lua,
+) -> impl Fn((u32, usize)) -> mlua::Result<mlua::Value> {
+    move |(id, idx): (u32, usize)| {
+        let c = tcc.attrs(id).map_err(to_lua_err)?;
         let (_, v) = c.get(idx).ok_or_else(|| make_oob_error(idx as u32, c.len()))?;
         LuaValueRefRef(v).into_lua(lua)
     }
 }
 
-pub fn en_as_string(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, u32) -> mlua::Result<mlua::String> {
-    move |lua: &Lua, id: u32| {
-        let tcc = trace_provider.read().unwrap();
-        let attrs = tcc.attrs(id).map_err(to_lua_error)?;
-        let meta = tcc.meta(id).map_err(to_lua_error)?;
-        let children = tcc.children(id).map_err(to_lua_error)?;
+pub fn en_as_string(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult<String> {
+    move |id: u32| {
+        let attrs = tcc.attrs(id)?;
+        let meta = tcc.meta(id)?;
+        let children = tcc.children(id)?;
 
         #[derive(Debug)]
         #[allow(dead_code)]
@@ -256,19 +210,16 @@ pub fn en_as_string(
             children: &'a [u32],
         }
         let entry = Entry { meta: &meta, attrs: &attrs, children };
-        let s = format!("{entry:?}");
-        lua.create_string(s)
+        Ok(format!("{entry:?}"))
     }
 }
 
 pub fn en_contains_anywhere(
-    trace_provider: Arc<RwLock<TraceProvider>>, finder_cache: Rc<RefCell<HashMap<String, Finder>>>,
-) -> impl Fn(&Lua, (u32, String)) -> mlua::Result<bool> {
-    move |_lua: &Lua, (id, needle): (u32, String)| {
-        let tcc = trace_provider.read().unwrap();
-        let attrs = tcc.attrs(id).map_err(to_lua_error)?;
-        let meta = tcc.meta(id).map_err(to_lua_error)?;
-        let children = tcc.children(id).map_err(to_lua_error)?;
+    tcc: &impl LogProvider, finder_cache: Rc<RefCell<HashMap<String, Finder>>>,
+) -> impl Fn((u32, String)) -> LogProviderResult<bool> {
+    move |(id, needle): (u32, String)| {
+        let entry = en_as_string(tcc)(id)?;
+
         let mut finder_w = finder_cache.borrow_mut();
         let finder = if let Some(q) = finder_w.get(&needle) {
             q
@@ -276,14 +227,6 @@ pub fn en_contains_anywhere(
             finder_w.insert(needle.clone(), memchr::memmem::Finder::new(&needle).into_owned());
             finder_w.get(&needle).unwrap()
         };
-        #[derive(Debug)]
-        #[allow(dead_code)]
-        struct Entry<'a> {
-            meta: &'a MetadataRefContainer<'a>,
-            attrs: &'a Vec<(&'a str, EnValueRef<'a>)>,
-            children: &'a [u32],
-        }
-        let entry = Entry { meta: &meta, attrs: &attrs, children };
         let s = format!("{entry:?}");
         let contains = finder.find(s.as_bytes());
         Ok(contains.is_some())
@@ -376,9 +319,9 @@ fn values_match(comparator: std::cmp::Ordering, span_value: &EnValueRef, value: 
 }
 
 pub fn filter_inner(
-    tcc: RwLockReadGuard<TraceProvider>, ids: impl Iterator<Item = u32>, target: &str,
-    target_is_meta: bool, relation: Ordering, en_value: EnValue,
-) -> mlua::Result<Vec<u32>> {
+    tcc: &impl LogProvider, ids: impl Iterator<Item = u32>, target: &str, target_is_meta: bool,
+    relation: Ordering, en_value: EnValue,
+) -> anyhow::Result<Vec<u32>> {
     let mut returned = Vec::with_capacity(128);
     for id in ids {
         if target_is_meta {
@@ -442,62 +385,188 @@ fn parse_filter_desc(desc: mlua::Table) -> mlua::Result<(String, bool, Ordering,
 ///   relation: a relation, one of "EQ", "LT", "GT"
 ///   value: a constant to compare with
 /// Returns the ids of the spans matching the compare_desc.
-pub fn en_filter(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, (Vec<u32>, Table)) -> mlua::Result<Vec<u32>> {
-    move |_lua: &Lua, (ids, desc): (Vec<u32>, Table)| {
-        let tcc = trace_provider.read().unwrap();
+pub fn en_filter(tcc: &impl LogProvider) -> impl Fn((Vec<u32>, Table)) -> anyhow::Result<Vec<u32>> {
+    move |(ids, desc): (Vec<u32>, Table)| {
         let (target, target_is_meta, relation, en_value) = parse_filter_desc(desc)?;
         filter_inner(tcc, ids.iter().copied(), &target, target_is_meta, relation, en_value)
     }
 }
 /// Same as en_filter, but accets a range start and range end instead
 pub fn en_filter_range(
-    trace_provider: Arc<RwLock<TraceProvider>>,
-) -> impl Fn(&Lua, (u32, u32, Table)) -> mlua::Result<Vec<u32>> {
-    move |_lua: &Lua, (start, end, desc): (u32, u32, Table)| {
-        let tcc = trace_provider.read().unwrap();
+    tcc: &impl LogProvider,
+) -> impl Fn((u32, u32, Table)) -> anyhow::Result<Vec<u32>> {
+    move |(start, end, desc): (u32, u32, Table)| {
         let (target, target_is_meta, relation, en_value) = parse_filter_desc(desc)?;
         filter_inner(tcc, start..=end, &target, target_is_meta, relation, en_value)
     }
 }
 
-pub fn setup_lua(
+struct DynAdapter<'a>(&'a dyn LogProvider);
+impl<'a> LogProvider for DynAdapter<'a> {
+    fn children(&self, x: u32) -> Result<&[u32], LogProviderError> {
+        self.0.children(x)
+    }
+
+    fn parent(&self, x: u32) -> Result<u32, LogProviderError> {
+        self.0.parent(x)
+    }
+
+    fn attrs(&'_ self, x: u32) -> Result<Vec<(&'_ str, EnValueRef<'_>)>, LogProviderError> {
+        self.0.attrs(x)
+    }
+
+    fn header(&'_ self, x: u32) -> Result<entrace_core::Header<'_>, LogProviderError> {
+        self.0.header(x)
+    }
+
+    fn meta(&'_ self, x: u32) -> Result<MetadataRefContainer<'_>, LogProviderError> {
+        self.0.meta(x)
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+macro_rules! lua_setup_with_wrappers {
+    ($lua: expr, $trace: expr, $finder_cache: expr, $range: expr, $lua_wrap: ident, $lua_wrap2: ident) => {
+        let globals = $lua.globals();
+        let en_range = $lua.create_function(move |_state, _: ()| en_span_range(&$range));
+        globals.set("en_span_range", en_range?)?;
+        globals.set("en_log", $lua.create_function(move |_, x| en_log(x))?)?;
+        let t = $trace.clone();
+        globals.set("en_children", $lua.create_function($lua_wrap!(t, u32, en_children))?)?;
+        globals.set("en_child_cnt", $lua.create_function($lua_wrap!(t, u32, en_child_cnt))?)?;
+        globals.set("en_span_cnt", $lua.create_function($lua_wrap!(t, (), en_span_cnt))?)?;
+        globals.set(
+            "en_metadata_table",
+            $lua.create_function($lua_wrap2!(t, u32, en_metadata_table))?,
+        )?;
+        globals
+            .set("en_metadata_name", $lua.create_function($lua_wrap!(t, u32, en_metadata_name))?)?;
+        globals.set(
+            "en_metadata_level",
+            $lua.create_function($lua_wrap!(t, u32, en_metadata_level))?,
+        )?;
+        globals
+            .set("en_metadata_file", $lua.create_function($lua_wrap!(t, u32, en_metadata_file))?)?;
+        globals
+            .set("en_metadata_line", $lua.create_function($lua_wrap!(t, u32, en_metadata_line))?)?;
+        globals.set(
+            "en_metadata_target",
+            $lua.create_function($lua_wrap!(t, u32, en_metadata_target))?,
+        )?;
+        globals.set(
+            "en_metadata_module_path",
+            $lua.create_function($lua_wrap!(t, u32, en_metadata_module_path))?,
+        )?;
+        globals.set("en_attrs", $lua.create_function($lua_wrap2!(t, u32, en_attrs))?)?;
+        globals.set("en_attr_names", $lua.create_function($lua_wrap2!(t, u32, en_attr_names))?)?;
+        globals
+            .set("en_attr_values", $lua.create_function($lua_wrap2!(t, u32, en_attr_values))?)?;
+        globals.set(
+            "en_attr_by_idx",
+            $lua.create_function($lua_wrap2!(t, (u32, usize), en_attr_by_idx))?,
+        )?;
+        globals.set(
+            "en_attr_by_name",
+            $lua.create_function($lua_wrap2!(t, (u32, String), en_attr_by_name))?,
+        )?;
+        globals.set(
+            "en_attr_name",
+            $lua.create_function($lua_wrap2!(t, (u32, usize), en_attr_name))?,
+        )?;
+        globals.set(
+            "en_attr_value",
+            $lua.create_function($lua_wrap2!(t, (u32, usize), en_attr_value))?,
+        )?;
+        globals.set("en_as_string", $lua.create_function($lua_wrap!(t, u32, en_as_string))?)?;
+        let t = $trace.clone();
+        globals
+            .set("en_filter", $lua.create_function($lua_wrap!(t, (Vec<u32>, Table), en_filter))?)?;
+        globals.set(
+            "en_filter_range",
+            $lua.create_function($lua_wrap!(t, (u32, u32, Table), en_filter_range))?,
+        )?;
+    };
+}
+pub fn setup_lua_on_arc_rwlock(
     lua: &mut Lua, range: RangeInclusive<u32>, trace: Arc<RwLock<TraceProvider>>,
     finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>,
 ) -> Result<(), mlua::Error> {
-    let globals = lua.globals();
-    let en_range = lua.create_function(move |_state, _: ()| en_span_range(&range));
-    globals.set("en_span_range", en_range?)?;
-    globals.set("en_log", lua.create_function(move |_, x| en_log(x))?)?;
-    globals.set("en_children", lua.create_function(en_children(trace.clone()))?)?;
-    globals.set("en_child_cnt", lua.create_function(en_child_cnt(trace.clone()))?)?;
-    globals.set("en_span_cnt", lua.create_function(en_span_cnt(trace.clone()))?)?;
-    globals.set("en_metadata_table", lua.create_function(en_metadata(trace.clone()))?)?;
-    globals.set("en_metadata_name", lua.create_function(en_metadata_name(trace.clone()))?)?;
-    globals.set("en_metadata_level", lua.create_function(en_metadata_level(trace.clone()))?)?;
-    globals.set("en_metadata_file", lua.create_function(en_metadata_file(trace.clone()))?)?;
-    globals.set("en_metadata_line", lua.create_function(en_metadata_line(trace.clone()))?)?;
-    globals.set("en_metadata_target", lua.create_function(en_metadata_target(trace.clone()))?)?;
-    globals.set(
-        "en_metadata_module_path",
-        lua.create_function(en_metadata_module_path(trace.clone()))?,
-    )?;
-    globals.set("en_attrs", lua.create_function(en_attrs(trace.clone()))?)?;
-    globals.set("en_attr_names", lua.create_function(en_attr_names(trace.clone()))?)?;
-    globals.set("en_attr_values", lua.create_function(en_attr_values(trace.clone()))?)?;
-    globals.set("en_attr_by_idx", lua.create_function(en_attr_by_idx(trace.clone()))?)?;
-    globals.set("en_attr_by_name", lua.create_function(en_attr_by_name(trace.clone()))?)?;
-    globals.set("en_attr_name", lua.create_function(en_attr_name(trace.clone()))?)?;
-    globals.set("en_attr_value", lua.create_function(en_attr_value(trace.clone()))?)?;
-    globals.set("en_as_string", lua.create_function(en_as_string(trace.clone()))?)?;
-    let fc = finder_cache.clone();
-    globals.set(
-        "en_contains_anywhere",
-        lua.create_function(en_contains_anywhere(trace.clone(), fc))?,
-    )?;
-    globals.set("en_filter", lua.create_function(en_filter(trace.clone()))?)?;
-    globals.set("en_filter_range", lua.create_function(en_filter_range(trace.clone()))?)?;
+    /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
+    /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
+    macro_rules! lua_wrap {
+        ($trace_provider: expr, $arg: ty, $fn: expr) => {{
+            let tp = $trace_provider.clone();
+            move |_lua: &Lua, a: $arg| {
+                let log = tp.read().unwrap();
+                let adapter = DynAdapter(&**log);
+                $fn(&adapter)(a).map_err(|x| x.into_lua_err())
+            }
+        }};
+    }
 
+    /// INPUT a Fn(impl LogProvider, Lua) -> Fn($arg) -> mlua::Result<T>
+    /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
+    macro_rules! lua_wrap2 {
+        ($trace_provider: expr, $arg: ty, $fn: expr) => {{
+            let tp = $trace_provider.clone();
+            move |lua: &Lua, a: $arg| {
+                let log = tp.read().unwrap();
+                let adapter = DynAdapter(&**log);
+                $fn(&adapter, lua)(a)
+            }
+        }};
+    }
+    let t = trace.clone();
+    lua.globals().set(
+        "en_contains_anywhere",
+        lua.create_function(move |_lua: &Lua, (id, needle): (u32, String)| {
+            let log = t.read().unwrap();
+            let adapter = DynAdapter(&**log);
+            en_contains_anywhere(&adapter, finder_cache.clone())((id, needle)).map_err(to_lua_err)
+        })?,
+    )?;
+    lua_setup_with_wrappers!(lua, trace, finder_cache, range, lua_wrap, lua_wrap2);
+    Ok(())
+}
+
+pub fn setup_lua_no_lock(
+    lua: &mut Lua, range: RangeInclusive<u32>, trace: Arc<TraceProvider>,
+    finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>,
+) -> Result<(), mlua::Error> {
+    /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
+    /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
+    macro_rules! lua_wrap {
+        ($trace_provider: expr, $arg: ty, $fn: expr) => {{
+            let tp = $trace_provider.clone();
+            move |_lua: &Lua, a: $arg| {
+                let adapter = DynAdapter(&**tp);
+                $fn(&adapter)(a).map_err(|x| x.into_lua_err())
+            }
+        }};
+    }
+
+    /// INPUT a Fn(impl LogProvider, Lua) -> Fn($arg) -> mlua::Result<T>
+    /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
+    macro_rules! lua_wrap2 {
+        ($trace_provider: expr, $arg: ty, $fn: expr) => {{
+            let tp = $trace_provider.clone();
+            move |lua: &Lua, a: $arg| {
+                let adapter = DynAdapter(&**tp);
+                $fn(&adapter, lua)(a)
+            }
+        }};
+    }
+    let t = trace.clone();
+    lua.globals().set(
+        "en_contains_anywhere",
+        lua.create_function(move |_lua: &Lua, (id, needle): (u32, String)| {
+            let adapter = DynAdapter(&**t);
+            en_contains_anywhere(&adapter, finder_cache.clone())((id, needle)).map_err(to_lua_err)
+        })?,
+    )?;
+    lua_setup_with_wrappers!(lua, trace, finder_cache, range, lua_wrap, lua_wrap2);
     Ok(())
 }
