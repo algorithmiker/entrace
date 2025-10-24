@@ -6,9 +6,7 @@
 - Query
 	- "virtual span" for aggregate data
 - Cli
-	- new entrace_cli command
-	- provide a Lua environment with the standard query api
-	- convert traces via CLI
+	- convert traces via CLI (especially to JSON)
 
 - tests
 	- test IHT roundtrip with and without length prefix
@@ -30,6 +28,8 @@
 		- highlight new items (very low prio)
 	
 - DONE
+	- new entrace_cli command
+		- provide a Lua environment with the standard query api
 	- gate entrace_core dependencies behind features
 	- gui: query settings dialog doesn't get updated position after resizing window
 	- Docs: write docs
