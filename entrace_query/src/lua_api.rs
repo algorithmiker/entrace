@@ -14,10 +14,12 @@ use entrace_core::{
     MetadataRefContainer,
 };
 use memchr::memmem::Finder;
-use mlua::{ExternalError, IntoLua, Lua, Table, Value};
+use mlua::{ExternalError, ExternalResult, IntoLua, Lua, Table, Value};
+use roaring::RoaringBitmap;
 
 use crate::{
     QueryError, TraceProvider,
+    filtersets::{Filterset, Matcher, Predicate},
     lua_value::{LuaValueRef, LuaValueRefRef},
 };
 fn level_to_u8(level: &entrace_core::LevelContainer) -> u8 {
@@ -35,10 +37,27 @@ fn make_oob_error(index: u32, len: usize) -> mlua::Error {
     mlua::Error::ExternalError(Arc::new(e))
 }
 
+/// Handles the restricted subset of table copying we need.
+/// Doesn't handle tables as keys.
+fn deepcopy_table(lua: &Lua, table: Table) -> mlua::Result<Table> {
+    let new_table = lua.create_table()?;
+
+    for pair in table.pairs::<Value, Value>() {
+        let (k, v) = pair?;
+        let v_copy = match v {
+            Value::Table(t2) => mlua::Value::Table(deepcopy_table(lua, t2)?),
+            _ => v,
+        };
+        new_table.set(k, v_copy)?;
+    }
+    Ok(new_table)
+}
 fn to_lua_err(x: impl Error + Send + Sync + 'static) -> mlua::Error {
     x.into_lua_err()
 }
-
+pub fn en_pretty_table(table: Table) -> mlua::Result<String> {
+    Ok(format!("{table:#?}"))
+}
 pub fn en_span_range(range: &RangeInclusive<u32>) -> mlua::Result<(u32, u32)> {
     Ok((*range.start(), *range.end()))
 }
@@ -132,7 +151,7 @@ pub fn en_attrs(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> mlua::Resu
 
 pub fn en_attr_names(
     tcc: &impl LogProvider, lua: &Lua,
-) -> impl Fn(u32) -> mlua::Result<Vec<Value>> {
+) -> impl Fn(u32) -> mlua::Result<Vec<mlua::Value>> {
     move |id: u32| {
         let c = tcc.attrs(id).map_err(to_lua_err)?;
         let mut names = Vec::with_capacity(c.len());
@@ -145,7 +164,7 @@ pub fn en_attr_names(
 
 pub fn en_attr_values(
     tcc: &impl LogProvider, lua: &Lua,
-) -> impl Fn(u32) -> mlua::Result<Vec<Value>> {
+) -> impl Fn(u32) -> mlua::Result<Vec<mlua::Value>> {
     move |id: u32| {
         let c = tcc.attrs(id).map_err(to_lua_err)?;
         let mut values = Vec::with_capacity(c.len());
@@ -275,8 +294,10 @@ fn meta_matches(
         x => bail!("Bad meta field {x}"),
     }
 }
-
-fn values_match(comparator: std::cmp::Ordering, span_value: &EnValueRef, value: &EnValue) -> bool {
+/// Returns true if span_value R value
+pub fn values_match(
+    comparator: std::cmp::Ordering, span_value: &EnValueRef, value: &EnValue,
+) -> bool {
     match value {
         EnValue::String(a) => match span_value {
             EnValueRef::String(b) => b.cmp(&a.as_str()) == comparator,
@@ -317,90 +338,488 @@ fn values_match(comparator: std::cmp::Ordering, span_value: &EnValueRef, value: 
         EnValue::Bytes(_) => false,
     }
 }
+pub fn span_matches_filter(
+    tcc: &impl LogProvider, id: u32, target: &str, target_is_meta: bool, relation: Ordering,
+    en_value: &EnValue,
+) -> bool {
+    if target_is_meta {
+        let meta = tcc.meta(id).unwrap();
+        meta_matches(&meta, target, relation, en_value).map_err(|x| x.into_lua_err()).unwrap()
+    } else {
+        let attrs = tcc.attrs(id).unwrap();
+        let Some((_name, target_here)) = attrs.iter().find(|(name, _)| *name == target) else {
+            return false;
+        };
+        values_match(relation, target_here, en_value)
+    }
+}
 
-pub fn filter_inner(
-    tcc: &impl LogProvider, ids: impl Iterator<Item = u32>, target: &str, target_is_meta: bool,
-    relation: Ordering, en_value: EnValue,
-) -> anyhow::Result<Vec<u32>> {
-    let mut returned = Vec::with_capacity(128);
-    for id in ids {
-        if target_is_meta {
-            let meta = tcc.meta(id).unwrap();
-            let matches_here =
-                meta_matches(&meta, target, relation, &en_value).map_err(|x| x.into_lua_err())?;
-            if matches_here {
-                returned.push(id);
-            }
-        } else {
-            let attrs = tcc.attrs(id).unwrap();
-            let Some((_name, target_here)) = attrs.iter().find(|(name, _)| *name == target) else {
-                continue;
-            };
-            let matches_here = values_match(relation, target_here, &en_value);
-            if matches_here {
-                returned.push(id);
+// =========================================FILTERSET API FOR LUA=========================================
+// A filterset looks like:
+//   type: "filterset"
+//   root: 1
+//   items: {
+//     { type = "prim_list"; value = [1,2,3];},
+//     { type = "rel", target = "", relation = "", value = "", src = 0 },
+//   }
+//
+//   Valid item types are: "prim_list", "prim_range", "rel", "rel_intersect", "rel_union",
+//   "intersect", "union", "invert"
+
+/// en_filterset_from_list()
+///  input: list of ids
+///  outputs: a table with
+///    type: "filterset"
+///    root: 0
+///    items: {
+///      { type = "prim_list"; value = the list}
+///    }
+pub fn en_filterset_from_list(lua: &Lua, t: Table) -> mlua::Result<Table> {
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    fs.set("root", 0)?;
+
+    let item = lua.create_table()?;
+    item.set("type", "prim_list")?;
+    item.set("value", t)?;
+
+    let items = lua.create_table()?;
+    items.push(item)?;
+    fs.set("items", items)?;
+    Ok(fs)
+}
+
+/// en_filterset_from_range()
+///  input: start, end
+///  outputs: a table with
+///    type: "filterset"
+///    root: 0
+///    items: {
+///      { type = "prim_range"; start = start, end=end}
+///    }
+pub fn en_filterset_from_range(lua: &Lua, (start, end): (usize, usize)) -> mlua::Result<Table> {
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    fs.set("root", 0)?;
+
+    let item = lua.create_table()?;
+    item.set("type", "prim_range")?;
+    item.set("start", start)?;
+    item.set("end", end)?;
+
+    let items = lua.create_table()?;
+    items.push(item)?;
+    fs.set("items", items)?;
+    Ok(fs)
+}
+
+/// en_filter()
+/// input:
+///   filter: table with
+///     target: name of variable eg. "message" or "meta.filename"
+///     relation: a relation, one of "EQ", "LT", "GT"
+///     value: a constant to compare with
+///   src: filterset
+/// outputs: a filterset with the filter as an item
+pub fn en_filter(lua: &Lua, (filter, src): (Table, Table)) -> mlua::Result<Table> {
+    let old_items: Table = src.get("items")?;
+    let items_len = old_items.len()?;
+    let new_items = deepcopy_table(lua, old_items)?;
+    let filter2 = deepcopy_table(lua, filter)?;
+    filter2.set("type", "rel")?;
+    filter2.set("src", items_len.saturating_sub(1))?;
+    new_items.push(filter2)?;
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    fs.set("root", items_len)?;
+    fs.set("items", new_items)?;
+    Ok(fs)
+}
+/// en_filter_all()
+/// input:
+///   filters: list of filter tables: table with
+///     target: name of variable eg. "message" or "meta.filename"
+///     relation: a relation, one of "EQ", "LT", "GT"
+///     value: a constant to compare with
+///   src: filterset
+/// outputs: a filterset that matches an item if all filters match it (the intersection of filters)
+/// { type: "filterset",
+///   root: 1,
+///   items: {
+///     { type = "prim_list", value = {1,2,3}},
+///     { type = "rel_intersect",
+///       filters = {
+///         { target = "", relation = "EQ", value = ""},
+///         { target = "", relation = "EQ", value = ""}
+///       },
+///       src = 0,
+///     }    
+/// }
+///
+/// This is the same as the en_filterset_intersect of the filters, or doing en_filter({}, en_filter({}, x)),
+/// but faster. The filterset evaluator will try to rewrite to this form if possible.
+pub fn en_filter_all(lua: &Lua, (filters, src): (Table, Table)) -> mlua::Result<Table> {
+    let old_items: Table = src.get("items")?;
+    let items_len = old_items.len()?;
+    let new_items = deepcopy_table(lua, old_items)?;
+
+    let intersect_filter = lua.create_table()?;
+    intersect_filter.set("type", "rel_intersect")?;
+    intersect_filter.set("src", items_len.saturating_sub(1))?;
+    intersect_filter.set("filters", filters)?;
+    new_items.push(intersect_filter)?;
+
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    fs.set("root", items_len)?;
+    fs.set("items", new_items)?;
+    Ok(fs)
+}
+
+/// en_filter_any()
+/// input:
+///   filters: list of filter tables: table with
+///     target: name of variable eg. "message" or "meta.filename"
+///     relation: a relation, one of "EQ", "LT", "GT"
+///     value: a constant to compare with
+///   src: filterset
+/// outputs: a filterset that matches an item if all filters match it (the intersection of filters)
+/// { type: "filterset",
+///   root: 1,
+///   items: {
+///     { type = "prim_list", value = {1,2,3}},
+///     { type = "rel_union",
+///       filters = {
+///         { target = "", relation = "EQ", value = ""},
+///         { target = "", relation = "EQ", value = ""}
+///       },
+///       src = 0,
+///     }    
+/// }
+///
+/// This is the same as the en_filterset_union of the filters, but faster. The filterset evaluator will try to rewrite to this form if possible.
+pub fn en_filter_any(lua: &Lua, (filters, src): (Table, Table)) -> mlua::Result<Table> {
+    let old_items: Table = src.get("items")?;
+    let items_len = old_items.len()?;
+    let new_items = deepcopy_table(lua, old_items)?;
+
+    let union_filter = lua.create_table()?;
+    union_filter.set("type", "rel_union")?;
+    union_filter.set("src", items_len.saturating_sub(1))?;
+    union_filter.set("filters", filters)?;
+    new_items.push(union_filter)?;
+
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    fs.set("root", items_len)?;
+    fs.set("items", new_items)?;
+    Ok(fs)
+}
+
+/// Helper used by [en_filterset_union] and [en_filterset_intersect] to fix up the source pointers
+/// in item lists when concatenating multiple items lists
+fn increment_item_source(amount: i64, item: &Table) -> mlua::Result<()> {
+    if let Ok(mlua::Value::Integer(q)) = item.get("src") {
+        item.set("src", q + amount)?;
+    }
+    if let Ok(mlua::Value::Table(srcs)) = item.get("srcs") {
+        let len = srcs.len()?;
+        for x in 1..=len {
+            if let Ok(mlua::Value::Integer(q)) = srcs.get(x) {
+                srcs.set(x, q + amount)?;
             }
         }
     }
-    Ok(returned)
+    Ok(())
 }
 
-fn parse_filter_desc(desc: mlua::Table) -> mlua::Result<(String, bool, Ordering, EnValue)> {
-    use anyhow::anyhow;
-    let Ok(raw_target): mlua::Result<String> = desc.get("target") else {
-        return Err(anyhow!("Filter target must be a string").into_lua_err());
-    };
-    let mut target: &str = raw_target.as_str();
-    let mut target_is_meta = false;
-    if let Some(stripped) = raw_target.strip_prefix("meta.") {
-        target = stripped;
-        target_is_meta = true;
+fn concat_items_lists(lua: &Lua, filters: Table) -> mlua::Result<(Table, Vec<i64>)> {
+    let all_items = lua.create_table()?;
+    let filter_cnt = filters.len()?;
+    let mut additional_len_before = 0;
+    let mut srcs = vec![];
+    for i in 1..=filter_cnt {
+        let filter: Table = filters.get(i)?;
+        let items: Table = filter.get("items")?;
+        let item_cnt = items.len()?;
+        for j in 1..=item_cnt {
+            let item: Table = items.get(j)?;
+            let item = deepcopy_table(lua, item)?;
+            increment_item_source(additional_len_before, &item)?;
+            all_items.push(item)?;
+        }
+        srcs.push(item_cnt - 1 + additional_len_before);
+        additional_len_before += item_cnt;
     }
-    let Ok(rel): mlua::Result<String> = desc.get("relation") else {
-        return Err(anyhow!("Filter relation must be a string").into_lua_err());
-    };
-    let relation = match rel.as_str() {
+
+    Ok((all_items, srcs))
+}
+/// en_filterset_union()
+/// input:
+///   filters: a list of filtersets, e. g
+///   {
+///     { type: "filterset",
+///       root: 1,
+///       items: {
+///         { type = "prim_list", value = {1,2,3}},
+///         { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+///       }
+///     }
+///     { type: "filterset",
+///       root: 1,
+///       items: {
+///         {type: "prim_list", value = {1,2,3} },
+///         {type: "rel", target = "b", relation = "EQ", value = "1", src = 0},
+///       }
+///     }
+///   }
+/// outputs: a filterset that matches an item if it is in any input filterset.
+/// This does NOT deduplicate any items, eg. for the given inputs, the result would be as follows.
+/// Note that en_materialize() MAY deduplicate, but there is no guarantee it will.
+/// { type: "filterset",
+///   root: 4,
+///   items: {
+///     { type = "prim_list", value = {1,2,3}},
+///     { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+///     { type: "prim_list", value = {1,2,3}},
+///     { type: "rel", target = "b", relation = "EQ", value = "1", src = 2 },
+///     { type: "union", srcs = { 1, 3 }}
+/// }
+///
+/// Note: if you are unioning filters on the same source filterset, en_filter_any will likely
+/// be faster.
+pub fn en_filterset_union(lua: &Lua, filters: Table) -> mlua::Result<Table> {
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    let (all_items, srcs) = concat_items_lists(lua, filters)?;
+    let union = lua.create_table()?;
+    union.set("type", "union")?;
+    union.set("srcs", srcs)?;
+    all_items.push(union)?;
+    fs.set("root", all_items.len()? - 1)?;
+    fs.set("items", all_items)?;
+    Ok(fs)
+}
+
+/// en_filterset_intersect()
+/// input:
+///   filters: a list of filtersets, e. g
+///   {
+///     { type: "filterset",
+///       root: 1,
+///       items: {
+///         { type = "prim_list", value = {1,2,3}},
+///         { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+///       }
+///     }
+///     { type: "filterset",
+///       root: 1,
+///       items: {
+///         {type: "prim_list", value = {1,2,3} },
+///         {type: "rel", target = "b", relation = "EQ", value = "1", src = 0},
+///       }
+///     }
+///   }
+/// outputs: a filterset that matches an item if it is in all input filtersets.
+/// This does NOT deduplicate any items, eg. for the given inputs, the result would be as follows.
+/// Note that en_materialize() MAY deduplicate, but there is no guarantee it will. (it currently
+/// doesn't, because an acyclic graph is required for evauator correctness, this might change).
+/// { type: "filterset",
+///   root: 4,
+///   items: {
+///     { type = "prim_list", value = {1,2,3}},
+///     { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+///     { type: "prim_list", value = {1,2,3}},
+///     { type: "rel", target = "b", relation = "EQ", value = "1", src = 2 },
+///     { type: "intersect", srcs = { 1, 3 }}
+/// }
+/// Note: if you are intersecting filters on the same source filterset, en_filter_all will likely
+/// be faster.
+pub fn en_filterset_intersect(lua: &Lua, filters: Table) -> mlua::Result<Table> {
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    let (all_items, srcs) = concat_items_lists(lua, filters)?;
+
+    let union = lua.create_table()?;
+    union.set("type", "intersect")?;
+    union.set("srcs", srcs)?;
+    all_items.push(union)?;
+    fs.set("root", all_items.len()? - 1)?;
+    fs.set("items", all_items)?;
+    Ok(fs)
+}
+
+/// en_filter()
+/// input: filterset
+/// outputs: a filterset that matches an item exactly if it is not in the filterset.
+pub fn en_filterset_not(lua: &Lua, filterset: Table) -> mlua::Result<Table> {
+    let new_fs = deepcopy_table(lua, filterset)?;
+    let not = lua.create_table()?;
+    not.set("type", "invert")?;
+    let new_items: Table = new_fs.get("items")?;
+    not.set("src", new_fs.len()? - 1)?;
+    new_items.push(not)?;
+    new_fs.set("root", new_items.len()? - 1)?;
+    Ok(new_fs)
+}
+
+/// Creates a Predicate from a Table that has keys "target", "relation", "value"
+fn parse_predicate(t: &Table) -> mlua::Result<Predicate<EnValue>> {
+    //     { type = "rel", target = "", relation = "", value = "", src = 0 },
+    let attr: String = t.get("target")?;
+    let relation: String = t.get("relation")?;
+    let rel = match relation.as_str() {
         "GT" => Ordering::Greater,
         "LT" => Ordering::Less,
         "EQ" => Ordering::Equal,
         x => return Err(anyhow::anyhow!("Bad filter relation {x}").into_lua_err()),
     };
 
-    let value: Value = desc.get("value").unwrap();
+    let value: mlua::Value = t.get("value")?;
     let en_value = match value {
         Value::Boolean(f) => EnValue::Bool(f),
         Value::Integer(k) => EnValue::I64(k),
         Value::Number(z) => EnValue::Float(z),
         Value::String(ref q) => EnValue::String(q.to_string_lossy()),
         x => {
-            return Err(anyhow!("Cannot convert value {x:?} to EnValue").into_lua_err());
+            return Err(anyhow::anyhow!("Cannot convert value {x:?} to EnValue").into_lua_err());
         }
     };
-    Ok((target.into(), target_is_meta, relation, en_value))
+    Ok(Predicate { attr, rel, constant: en_value })
 }
-
-/// en_filter(list<id>, compare_desc)
-/// where compare_desc is a table:
-///   target: name of variable eg. "message" or "meta.filename"
-///   relation: a relation, one of "EQ", "LT", "GT"
-///   value: a constant to compare with
-/// Returns the ids of the spans matching the compare_desc.
-pub fn en_filter(tcc: &impl LogProvider) -> impl Fn((Vec<u32>, Table)) -> anyhow::Result<Vec<u32>> {
-    move |(ids, desc): (Vec<u32>, Table)| {
-        let (target, target_is_meta, relation, en_value) = parse_filter_desc(desc)?;
-        filter_inner(tcc, ids.iter().copied(), &target, target_is_meta, relation, en_value)
+fn item_to_filterset(item: &Table) -> mlua::Result<Filterset<EnValue>> {
+    let ty: String = item.get("type")?;
+    match ty.as_str() {
+        "prim_list" => {
+            let value: Vec<u32> = item.get("value")?;
+            Ok(Filterset::Primitive(RoaringBitmap::from_iter(value)))
+        }
+        "prim_range" => {
+            let start: u32 = item.get("start")?;
+            let end: u32 = item.get("end")?;
+            let bm = RoaringBitmap::from_sorted_iter(start..=end).into_lua_err()?;
+            Ok(Filterset::Primitive(bm))
+        }
+        "rel" => {
+            let src: usize = item.get("src")?;
+            let pred = parse_predicate(item)?;
+            Ok(Filterset::Rel(pred, src))
+        }
+        "rel_intersect" => {
+            //     { type = "rel_intersect",
+            //       filters = {
+            //         { target = "", relation = "EQ", value = ""},
+            //       },
+            //       src = 0,
+            //     }
+            let filters: Vec<Table> = item.get("filters")?;
+            let predicates: mlua::Result<Vec<_>> = filters.iter().map(parse_predicate).collect();
+            let predicates = predicates?;
+            let src: usize = item.get("src")?;
+            Ok(Filterset::RelIntersect(predicates, src))
+        }
+        "rel_union" => {
+            let filters: Vec<Table> = item.get("filters")?;
+            let predicates: mlua::Result<Vec<_>> = filters.iter().map(parse_predicate).collect();
+            let predicates = predicates?;
+            let src: usize = item.get("src")?;
+            Ok(Filterset::RelUnion(predicates, src))
+        }
+        "intersect" => {
+            //     { type: "intersect", srcs = { 1, 3 }}
+            Ok(Filterset::And(item.get("srcs")?))
+        }
+        "union" => Ok(Filterset::And(item.get("srcs")?)),
+        "invert" => Ok(Filterset::Not(item.get("src")?)),
+        x => Err(anyhow::anyhow!("Unknown filterset item type {x}").into_lua_err()),
     }
 }
-/// Same as en_filter, but accets a range start and range end instead
-pub fn en_filter_range(
-    tcc: &impl LogProvider,
-) -> impl Fn((u32, u32, Table)) -> anyhow::Result<Vec<u32>> {
-    move |(start, end, desc): (u32, u32, Table)| {
-        let (target, target_is_meta, relation, en_value) = parse_filter_desc(desc)?;
-        filter_inner(tcc, start..=end, &target, target_is_meta, relation, en_value)
+
+pub struct EnMatcher<'a, L: LogProvider> {
+    pub log: &'a L,
+}
+pub fn predicate_to_en_predicate(p: &Predicate<EnValue>) -> (&str, bool, &Ordering, &EnValue) {
+    let Predicate { attr, rel, constant: con } = p;
+    let mut target = attr.as_str();
+    let mut target_is_meta = false;
+    if let Some(stripped) = target.strip_prefix("meta.") {
+        target = stripped;
+        target_is_meta = true;
+    }
+    (target, target_is_meta, rel, con)
+}
+impl<L: LogProvider> Matcher<EnValue> for EnMatcher<'_, L> {
+    fn subset_matching(
+        &self, predicate: &Predicate<EnValue>, input: &RoaringBitmap,
+    ) -> RoaringBitmap {
+        let mut res = input.clone();
+        let (target, target_is_meta, rel, con) = predicate_to_en_predicate(predicate);
+        for id in input {
+            let matches_here = span_matches_filter(self.log, id, target, target_is_meta, *rel, con);
+            if !matches_here {
+                res.remove(id);
+            }
+        }
+        res
+    }
+    fn subset_matching_all(
+        &self, predicates: &[Predicate<EnValue>], input: &RoaringBitmap,
+    ) -> RoaringBitmap {
+        let mut res = input.clone();
+        let en_predicates: Vec<(&str, bool, &Ordering, &EnValue)> =
+            predicates.iter().map(predicate_to_en_predicate).collect();
+        for id in input {
+            let all_matches = en_predicates.iter().all(|(target, t_is_meta, rel, con)| {
+                span_matches_filter(self.log, id, target, *t_is_meta, **rel, con)
+            });
+            if !all_matches {
+                res.remove(id);
+            }
+        }
+        res
+    }
+    fn subset_matching_either(
+        &self, predicates: &[Predicate<EnValue>], input: &RoaringBitmap,
+    ) -> RoaringBitmap {
+        let mut res = input.clone();
+        let en_predicates: Vec<(&str, bool, &Ordering, &EnValue)> =
+            predicates.iter().map(predicate_to_en_predicate).collect();
+        for id in input {
+            let any_matches = en_predicates.iter().any(|(target, t_is_meta, rel, con)| {
+                span_matches_filter(self.log, id, target, *t_is_meta, **rel, con)
+            });
+            if !any_matches {
+                res.remove(id);
+            }
+        }
+        res
     }
 }
+/// Materialize a filterset; which means going from the lazy representation of filters as a series
+/// of operations into a concrete list of matching indices.
+/// In some lazy languages, this operation is called "force".
+pub fn en_filterset_materialize(
+    log: &impl LogProvider, _lua: &Lua,
+) -> impl Fn(Table) -> mlua::Result<Vec<u32>> {
+    |filterset: Table| {
+        let matcher = EnMatcher { log };
+        let mut evaluator = crate::filtersets::Evaluator::from_matcher(matcher);
+        let root: usize = filterset.get("root")?;
+        let items: Table = filterset.get("items")?;
+        let item_cnt = items.len()?;
 
+        for i in 1..=item_cnt {
+            let item: Table = items.get(i)?;
+            let fs = item_to_filterset(&item)?;
+            evaluator.pool.push(fs);
+        }
+        evaluator.normalize(root);
+        evaluator.materialize(root);
+        let result: Vec<u32> = evaluator.results[&root].iter().collect();
+
+        Ok(result)
+    }
+}
 struct DynAdapter<'a>(&'a dyn LogProvider);
 impl<'a> LogProvider for DynAdapter<'a> {
     fn children(&self, x: u32) -> Result<&[u32], LogProviderError> {
@@ -434,6 +853,7 @@ macro_rules! lua_setup_with_wrappers {
         let en_range = $lua.create_function(move |_state, _: ()| en_span_range(&$range));
         globals.set("en_span_range", en_range?)?;
         globals.set("en_log", $lua.create_function(move |_, x| en_log(x))?)?;
+        globals.set("en_pretty_table", $lua.create_function(move |_, t| en_pretty_table(t))?)?;
         let t = $trace.clone();
         globals.set("en_children", $lua.create_function($lua_wrap!(t, u32, en_children))?)?;
         globals.set("en_child_cnt", $lua.create_function($lua_wrap!(t, u32, en_child_cnt))?)?;
@@ -482,11 +902,18 @@ macro_rules! lua_setup_with_wrappers {
         )?;
         globals.set("en_as_string", $lua.create_function($lua_wrap!(t, u32, en_as_string))?)?;
         let t = $trace.clone();
-        globals
-            .set("en_filter", $lua.create_function($lua_wrap!(t, (Vec<u32>, Table), en_filter))?)?;
+
+        globals.set("en_filterset_from_list", $lua.create_function(en_filterset_from_list)?)?;
+        globals.set("en_filterset_from_range", $lua.create_function(en_filterset_from_range)?)?;
+        globals.set("en_filter", $lua.create_function(en_filter)?)?;
+        globals.set("en_filter_all", $lua.create_function(en_filter_all)?)?;
+        globals.set("en_filter_any", $lua.create_function(en_filter_any)?)?;
+        globals.set("en_filterset_union", $lua.create_function(en_filterset_union)?)?;
+        globals.set("en_filterset_intersect", $lua.create_function(en_filterset_intersect)?)?;
+        globals.set("en_filterset_not", $lua.create_function(en_filterset_not)?)?;
         globals.set(
-            "en_filter_range",
-            $lua.create_function($lua_wrap!(t, (u32, u32, Table), en_filter_range))?,
+            "en_filterset_materialize",
+            $lua.create_function($lua_wrap2!(t, Table, en_filterset_materialize))?,
         )?;
     };
 }

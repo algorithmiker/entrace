@@ -70,3 +70,36 @@ function query8()
 	filtered = en_filter_range(r_start, r_end, filter_settings)
 	return filtered
 end
+
+-- we are looking for the spans where
+-- message = "constructed node"
+-- breadth > 1
+
+-- This is the "old fashioned" no filterset implementation
+function query9()
+	local rstart, rend = en_span_range()
+	local ids = {}
+	for i = rstart, rend do
+		local message_matches = en_attr_by_name(i, "message") == "constructed node"
+		if message_matches and (en_attr_by_name(i, "breadth") > 1) then
+			table.insert(ids, i)
+		end
+	end
+	return ids
+end
+
+function query10()
+	local rstart, rend = en_span_range()
+	local base = en_filterset_from_range(rstart, rend)
+
+	msg_filter_desc = { target = "message", value = "constructed node", relation = "EQ" }
+	local message_matches = en_filter(msg_filter_desc, base)
+
+	breadth_filter_desc = { target = "breadth", value = 1, relation = "GT" }
+	local breadth_matches = en_filter(breadth_filter_desc, message_matches)
+
+	final = breadth_matches
+
+	materialized = en_filterset_materialize(final)
+	return materialized
+end

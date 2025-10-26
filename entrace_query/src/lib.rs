@@ -1,5 +1,6 @@
 use entrace_core::LogProvider;
 
+pub mod filtersets;
 pub mod lua_api;
 pub mod lua_value;
 

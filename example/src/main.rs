@@ -105,6 +105,7 @@ fn paramtree(depth: usize, breadth: usize) {
         let mut new_level = vec![];
         #[allow(clippy::needless_range_loop)]
         for i in 0..breadth {
+            debug!(depth = j, breadth = i, "constructed node");
             let new_node = graph.add_node(format!("d{j}b{i}"));
             graph.add_edge(last_level[i], new_node, ());
             new_level.push(new_node);
@@ -164,7 +165,7 @@ pub fn work(args: &Args) {
         Work::SmallTree => small_tree(),
         Work::SmallTreeThreads => small_tree_threads(),
         Work::VerySimpleGraph => very_simple_graph(),
-        Work::Paramtree => paramtree(1000, 5_000),
+        Work::Paramtree => paramtree(1000, 3_000),
         Work::MultiLine => spammer_newline(1000),
         Work::Spammer => spammer(1_000_000),
         Work::Bursts => bursts(10_000, Duration::from_secs(1)),

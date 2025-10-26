@@ -520,7 +520,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bench"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "command-error",
@@ -660,6 +660,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "byteorder-lite"
@@ -1356,18 +1362,19 @@ dependencies = [
 
 [[package]]
 name = "entrace_query"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "entrace_core",
  "memchr",
  "mlua",
+ "roaring",
  "thiserror 2.0.17",
 ]
 
 [[package]]
 name = "entrace_script"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3406,6 +3413,16 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "roaring"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f08d6a905edb32d74a5d5737a0c9d7e950c312f3c46cb0ca0a2ca09ea11878a0"
+dependencies = [
+ "bytemuck",
+ "byteorder",
 ]
 
 [[package]]
