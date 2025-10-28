@@ -9,7 +9,7 @@ use entrace_core::{
     LogProvider, display_error_context,
     remote::{IETEvent, Notify, NotifyExt},
 };
-use tracing::info;
+use tracing::{info, trace};
 
 use crate::{
     benchmarkers::SamplingBenchmark,
@@ -85,7 +85,13 @@ impl LogState {
         self.tree_view.update_tree(Some(tree_benchmark), std::iter::once(0), ctx);
     }
     pub fn on_frame(&self, notifier: &impl Notify) {
-        self.trace_provider.write().unwrap().frame_callback();
+        if let Ok(mut q) = self.trace_provider.try_write() {
+            q.frame_callback();
+        } else {
+            trace!(
+                "Cannot acquire write lock on trace provider, next frame_callback will be delayed"
+            )
+        }
         if let Some(ref rx) = self.event_rx {
             while let Ok(y) = rx.try_recv() {
                 match y {
