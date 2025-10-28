@@ -35,7 +35,8 @@ pub trait LogProvider {
     /// This MUST be cheap as the frontend might call this every frame.
     fn len(&self) -> usize;
 
-    /// The frontent SHOULD call this at the beginning of each painted frame.
+    /// The frontent SHOULD call this at the beginning of each painted frame,
+    /// but there is no guarantee to whether or when it will.
     /// This runs on the main thread.
     /// The [LogProvider] implementation MUST ensure that this terminates quickly,
     /// as it directly affects FPS.

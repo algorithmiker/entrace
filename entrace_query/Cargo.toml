@@ -10,6 +10,7 @@ anyhow = "1.0.100"
 memchr = "2.7.6"
 thiserror = "2.0.17"
 roaring = "0.11.2"
+itertools = "0.14.0"
 
 [[bin]]
 name="entrace-query-test"
