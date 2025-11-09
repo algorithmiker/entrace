@@ -107,9 +107,9 @@ pub fn notifications(ui: &mut egui::Ui, app: &mut App) -> egui::InnerResponse<()
             let item_spacing = vec2(item_spacing.x * 0.5, item_spacing.y);
 
             let severity_galley =
-                ui.fonts(|x| x.layout_no_wrap(repr.0.to_string(), font_id.clone(), text_color));
-            let text_galley =
-                ui.fonts(|x| x.layout(notification.text.to_string(), font_id, text_color, 200.0));
+                ui.fonts_mut(|x| x.layout_no_wrap(repr.0.to_string(), font_id.clone(), text_color));
+            let text_galley = ui
+                .fonts_mut(|x| x.layout(notification.text.to_string(), font_id, text_color, 200.0));
             let severity_galley_size = severity_galley.size();
 
             let frame_width = (item_spacing.x + text_galley.size().x + item_spacing.x).max(100.0);

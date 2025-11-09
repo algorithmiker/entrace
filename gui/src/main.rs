@@ -17,7 +17,7 @@ use std::{
 };
 
 use egui::{
-    CollapsingHeader, Color32, Response, RichText, ScrollArea, TextStyle, Theme, Ui,
+    CollapsingHeader, Color32, FontId, Response, RichText, ScrollArea, TextStyle, Theme, Ui,
     epaint::RectShape, vec2,
 };
 use entrace_core::{LevelContainer, display_error_context};
@@ -306,6 +306,13 @@ fn span(
 }
 
 pub fn row_height(ui: &mut Ui) -> f32 {
-    ui.fonts(|x| x.row_height(&TextStyle::Body.resolve(ui.style())))
+    ui.fonts_mut(|x| x.row_height(&TextStyle::Body.resolve(ui.style())))
     //ui.fonts(|x| x.row_height(&FontId::default()))
+}
+
+pub fn row_height_from_ctx(ctx: &egui::Context) -> f32 {
+    // HACK: we can't use &TextStyle::Body.resolve(&ctx.style()) here, as it seems to run into a
+    // deadlock.
+    // Not sure what's the best way around this.
+    ctx.fonts_mut(|x| x.row_height(&FontId::default()))
 }

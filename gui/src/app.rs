@@ -9,7 +9,7 @@ use std::{
 use anyhow::Context;
 use clap::Parser;
 use egui::{
-    Color32, FontId, Margin, Pos2, Rect, RichText, Stroke, Theme, Ui,
+    Color32, Margin, Pos2, Rect, RichText, Stroke, Theme, Ui,
     epaint::text::{FontInsert, InsertFontFamily},
 };
 use entrace_core::{
@@ -30,6 +30,7 @@ use crate::{
     ephemeral_settings::EphemeralSettings,
     frame_time::{FrameTimeTracker, TrackFrameTime, us_to_human},
     notifications::{self, NotificationHandle, RefreshToken},
+    row_height_from_ctx,
     search::{self, LocatingState, SearchState, query_window::query_windows},
     self_tracing::SelfTracingState,
     settings::{self, SettingsDialogState, SettingsState, apply_settings},
@@ -281,7 +282,7 @@ impl eframe::App for App {
             });
         });
         if let LogStatus::Ready(log_state) = &self.log_status {
-            let font_size = ctx.fonts(|x| x.row_height(&FontId::monospace(FontId::default().size)));
+            let font_size = row_height_from_ctx(ctx);
             let text_field_margin = Margin::symmetric(4, 2);
             let text_field_size =
                 font_size * 2.0 + text_field_margin.topf() + text_field_margin.bottomf();

@@ -12,15 +12,15 @@ circular-buffer = "1.1.0"
 clap = { version = "4.5.40", features = ["derive"] }
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 directories = "6.0.0"
-eframe = "0.32.0"
-egui = "0.32.0"
-egui_extras = { version = "0.32.0", features = ["all_loaders"] }
-egui_material_icons = "0.4.0"
+eframe = "0.33.0"
+egui = "0.33.0"
+egui_extras = { version = "0.33.0", features = ["all_loaders"] }
+egui_material_icons = "0.5.0"
 entrace_core = { version = "0.1.1", path = "../entrace_core/" }
 entrace_query = { version = "0.1.1", path = "../entrace_query/" }
 memchr = "2.7.5"
 mimalloc = "0.1.47"
-mlua = { version = "0.10.5", features = ["error-send", "luajit"] }
+mlua = { version = "0.11.0", features = ["error-send", "luajit"] }
 notify = "8.0.0"
 rfd = "0.15.4"
 thiserror = "2.0.12"
