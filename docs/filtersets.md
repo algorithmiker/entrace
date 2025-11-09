@@ -28,13 +28,14 @@ enum Filterset {
 
 **Flattening**
 
-And([... And(children) ...]) -> And(flattened)
-Or([... Or(children) ...])  -> Or(flattened)
-Not(Not(X)) -> X
-And([A]) -> A
-Or([A]) -> A
+- And([... And(children) ...]) -> And(flattened)
+- Or([... Or(children) ...])  -> Or(flattened)
+- Not(Not(X)) -> X
+- And([A]) -> A
+- Or([A]) -> A
 
 **One Rule To Rule Them All**
+
 RelDnf(clauses, RelDnf(clauses2, A)) -> new clauses: c\_1 \times c\_2 (if the result won't be too big)
 
 **RelDnf in Or/And**
