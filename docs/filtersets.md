@@ -1,7 +1,8 @@
-THE FILTERSET CALCULUS (v2)
+Filterset API
 ---
 
-### TYPES
+This is a brief design doc on the Filterset evaluator (not to be confused with the lua interface of filtersets, the en_filterset_* functions).
+If you are looking for docs on how to use filtersets in ENTRACE, that's in the Lua API docs.
 
 ```rust
 type FiltersetId = usize;
@@ -34,7 +35,7 @@ And([A]) -> A
 Or([A]) -> A
 
 **One Rule To Rule Them All**
-1. RelDnf(clauses, RelDnf(clauses2, A)) -> new clauses: c_1 \times c_2 (if the result won't be too big)
+RelDnf(clauses, RelDnf(clauses2, A)) -> new clauses: c\_1 \times c\_2 (if the result won't be too big)
 
 **RelDnf in Or/And**
 1. Or([RelDnf(c, A), RelDnf(c2, A), RelDnf(c3, B), RelDnf(c4, B)]) -> Or([RelDnf(c+c2, A), RelDnf(c3+c4, B)])
