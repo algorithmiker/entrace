@@ -14,8 +14,7 @@ crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 directories = "6.0.0"
 eframe = "0.33.0"
 egui = "0.33.0"
-egui_extras = { version = "0.33.0", features = ["all_loaders"] }
-egui_material_icons = "0.5.0"
+egui_extras = { version = "0.33.0", features = ["svg"] }
 entrace_core = { version = "0.1.1", path = "../entrace_core/" }
 entrace_query = { version = "0.1.1", path = "../entrace_query/" }
 memchr = "2.7.5"
@@ -26,6 +25,13 @@ rfd = "0.15.4"
 thiserror = "2.0.12"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
+
+# dev only
+dioxus-devtools = {version = "0.7.2", optional = true}
+subsecond = {version = "0.7.2", optional = true}
+
+[features]
+dev = ["dep:subsecond", "dep:dioxus-devtools"]
 
 [dev-dependencies]
 divan = "0.1.21"

@@ -26,9 +26,8 @@ pub enum Filterset {
     Primitive(Roaring),
     BlackBox(FiltersetId),
     RelDnf(Vec<Vec<PredicateId>>, FiltersetId),
-    // TODO: HashSet instead of vec? could be faster
-    And(Vec<FiltersetId>),
-    Or(Vec<FiltersetId>),
+    And(HashSet<FiltersetId>),
+    Or(HashSet<FiltersetId>),
     Not(FiltersetId),
 }
 impl Filterset {
@@ -45,7 +44,7 @@ impl Filterset {
 #[derive(Debug)]
 pub enum RewriteAction {
     None,
-    // Pointer of outer and, and indices to inner ands in its item list
+    // Pointer of outer and, and the "and" items in its list
     CompressAnd(FiltersetId, Vec<FiltersetId>),
     CompressOr(FiltersetId, Vec<FiltersetId>),
     EliminateNotNot(FiltersetId, FiltersetId, FiltersetId),
@@ -60,7 +59,7 @@ pub enum RewriteAction {
 pub enum ChildrenRef<'a> {
     None,
     One(FiltersetId),
-    Many(&'a [FiltersetId]),
+    Many(&'a HashSet<FiltersetId>),
 }
 
 // I don't know what would be optimal, this is just going by feeling
@@ -206,49 +205,52 @@ impl<T> Evaluator<T> {
         match action {
             RewriteAction::None => (),
             RewriteAction::CompressAnd(id, inner_ands) => {
-                let Filterset::And(ref items) = self.pool[*id] else { unreachable!() };
-                // can probably be done better
-                let mut set: HashSet<FiltersetId> = HashSet::from_iter(items.iter().copied());
-                for ptr in inner_ands.iter() {
-                    set.remove(ptr);
-                    let Filterset::And(ref others) = self.pool[items[*ptr]] else { unreachable!() };
-                    set.extend(others);
-                }
-                let Filterset::And(ref mut items) = self.pool[*id] else { unreachable!() };
-                items.clear();
-                items.extend(set);
+                let Filterset::And(mut items) =
+                    std::mem::replace(&mut self.pool[*id], Filterset::Dead)
+                else {
+                    unreachable!()
+                };
                 for ptr in inner_ands {
-                    self.pool[*ptr] = Filterset::Dead;
+                    items.remove(ptr);
+                    let Filterset::And(ref others) =
+                        std::mem::replace(&mut self.pool[*ptr], Filterset::Dead)
+                    else {
+                        unreachable!()
+                    };
+                    items.extend(others.iter());
                 }
+                self.pool[*id] = Filterset::And(items);
             }
             RewriteAction::CompressOr(id, inner_ors) => {
-                let Filterset::Or(ref items) = self.pool[*id] else { unreachable!() };
-                let mut set: HashSet<FiltersetId> = HashSet::from_iter(items.iter().copied());
-                for ptr in inner_ors.iter() {
-                    set.remove(ptr);
-                    let Filterset::Or(ref others) = self.pool[items[*ptr]] else { unreachable!() };
-                    set.extend(others);
-                }
-                let Filterset::Or(ref mut items) = self.pool[*id] else { unreachable!() };
-                items.clear();
-                items.extend(set);
+                let Filterset::Or(mut items) =
+                    std::mem::replace(&mut self.pool[*id], Filterset::Dead)
+                else {
+                    unreachable!()
+                };
                 for ptr in inner_ors {
-                    self.pool[*ptr] = Filterset::Dead;
+                    items.remove(ptr);
+                    let Filterset::Or(ref others) =
+                        std::mem::replace(&mut self.pool[*ptr], Filterset::Dead)
+                    else {
+                        unreachable!()
+                    };
+                    items.extend(others.iter());
                 }
+                self.pool[*id] = Filterset::Or(items);
             }
             RewriteAction::EliminateSingleOr(id) => {
                 let Filterset::Or(srcs) = std::mem::replace(&mut self.pool[*id], Filterset::Dead)
                 else {
                     unreachable!()
                 };
-                self.pool.swap(*id, srcs[0]);
+                self.pool.swap(*id, *srcs.iter().next().unwrap());
             }
             RewriteAction::EliminateSingleAnd(id) => {
                 let Filterset::And(srcs) = std::mem::replace(&mut self.pool[*id], Filterset::Dead)
                 else {
                     unreachable!()
                 };
-                self.pool.swap(*id, srcs[0]);
+                self.pool.swap(*id, *srcs.iter().next().unwrap());
             }
             RewriteAction::EliminateNotNot(not1p, not2p, innerp) => {
                 self.pool[*not1p] = std::mem::replace(&mut self.pool[*innerp], Filterset::Dead);
