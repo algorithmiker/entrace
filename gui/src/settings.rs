@@ -2,8 +2,8 @@ use anyhow::Context as _;
 use crossbeam::channel::Receiver;
 use directories::ProjectDirs;
 use egui::{
-    Color32, Context, InnerResponse, Margin, RichText, TextStyle, ThemePreference, Ui,
-    epaint::RectShape, pos2, vec2,
+    Color32, Context, DragValue, InnerResponse, Margin, RichText, TextStyle, ThemePreference, Ui,
+    epaint::AlphaFromCoverage, pos2, vec2,
 };
 use entrace_core::remote::{NotifyExt, Refresh};
 use notify::{RecommendedWatcher, Watcher};
@@ -53,7 +53,7 @@ impl SettingsState {
     pub fn init(
         refresher: impl Refresh + Send + 'static, overrides: String,
     ) -> Result<SettingsStateInner, LoadSettingsError> {
-        let path = settings_path()?;
+        let path = get_settings_path()?;
         let settings = load_settings(&path, &overrides);
         use LoadSettingsError::*;
         match settings {
@@ -81,34 +81,82 @@ pub struct SettingsStateInner {
 }
 impl SettingsStateInner {
     pub fn reload(&mut self) -> Result<(), LoadSettingsError> {
-        let path = settings_path()?;
+        let path = get_settings_path()?;
         let settings = load_settings(&path, &self.overrides)?;
         self.settings = settings;
         Ok(())
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TextGamma {
+    DarkSpecial,
+    Gamma(f32),
+}
+
+impl TextGamma {
+    pub fn write_ini(&self, buf: &mut impl std::fmt::Write) -> std::fmt::Result {
+        match self {
+            TextGamma::DarkSpecial => buf.write_str("\"dark-special\""),
+            TextGamma::Gamma(y) => write!(buf, "{y}"),
+        }
+    }
+    pub fn to_ini(&self) -> String {
+        let mut buf = String::new();
+        self.write_ini(&mut buf).unwrap();
+        buf
+    }
+}
+impl From<&TextGamma> for AlphaFromCoverage {
+    fn from(value: &TextGamma) -> Self {
+        match value {
+            TextGamma::DarkSpecial => AlphaFromCoverage::TwoCoverageMinusCoverageSq,
+            TextGamma::Gamma(1.0) => AlphaFromCoverage::Linear,
+            TextGamma::Gamma(x) => AlphaFromCoverage::Gamma(*x),
+        }
+    }
+}
+
+// How to add a new setting:
+// - define it here
+// - add it to to_ini()
+// - add it to parse_line()
+// - add it to apply_settings()
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub ui_scale: f32,
-    pub track_fps: bool,
     pub self_tracing: SelfTracingLevel,
     pub save_self_trace: bool,
     pub theme: egui::ThemePreference,
+    pub light_text_gamma: TextGamma,
+    pub dark_text_gamma: TextGamma,
 }
 
 impl Settings {
     pub fn to_ini(&self) -> String {
-        let Settings { ui_scale, track_fps: _, self_tracing, theme, save_self_trace } = self;
+        let Settings {
+            ui_scale,
+            self_tracing,
+            theme,
+            save_self_trace,
+            light_text_gamma,
+            dark_text_gamma,
+        } = self;
         let theme = match theme {
             ThemePreference::Dark => "dark",
             ThemePreference::Light => "light",
             ThemePreference::System => "auto",
         };
-        let st = self_tracing.repr_first_low();
+        let self_tracing = self_tracing.repr_first_low();
+        let (light_text_gamma, dark_text_gamma) =
+            (light_text_gamma.to_ini(), dark_text_gamma.to_ini());
         format!(
-            "ui_scale = {ui_scale:.1}\nself_tracing = \"{st}\"\nsave_self_trace = \
-             {save_self_trace}\ntheme = \"{theme}\""
+            "ui_scale = {ui_scale:.1}
+self_tracing = \"{self_tracing}\"
+save_self_trace = {save_self_trace}
+theme = \"{theme}\"
+light_text_gamma = {light_text_gamma}
+dark_text_gamma = {dark_text_gamma}"
         )
     }
 }
@@ -116,10 +164,11 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             ui_scale: 1.0,
-            track_fps: false,
             self_tracing: SelfTracingLevel::Disabled,
             theme: ThemePreference::System,
             save_self_trace: true,
+            light_text_gamma: TextGamma::Gamma(1.0),
+            dark_text_gamma: TextGamma::DarkSpecial,
         }
     }
 }
@@ -174,7 +223,9 @@ pub enum LoadSettingsError {
     #[error("Failed to parse command line setting override {0}")]
     BadOverride(usize, #[source] Box<LoadSettingsError>),
 }
-pub fn settings_path() -> Result<PathBuf, LoadSettingsError> {
+
+/// Get the path of the settings file
+pub fn get_settings_path() -> Result<PathBuf, LoadSettingsError> {
     let log_dir = ProjectDirs::from("org", "entrace", "entrace")
         .ok_or(LoadSettingsError::UnknownSettingsDir)?;
     let mut pb = log_dir.config_local_dir().to_path_buf();
@@ -182,14 +233,11 @@ pub fn settings_path() -> Result<PathBuf, LoadSettingsError> {
     Ok(pb)
 }
 
-/// Does a syscall, call from background.
+/// Recursively create the settings directory and write the default settings to the config file
 pub fn ensure_settings_exist(path: impl AsRef<Path>) -> Result<(), LoadSettingsError> {
     let basedir = path.as_ref().parent().unwrap();
-    std::fs::create_dir_all(basedir).map_err(|_| {
-        LoadSettingsError::CannotCreateSettingsDir(
-            basedir.as_os_str().to_string_lossy().into_owned(),
-        )
-    })?;
+    std::fs::create_dir_all(basedir)
+        .map_err(|_| LoadSettingsError::CannotCreateSettingsDir(basedir.display().to_string()))?;
     let Ok(mut file) = OpenOptions::new().create_new(true).write(true).open(&path) else {
         // file already exists, or if it cannot be opened, will error later.
         return Ok(());
@@ -220,7 +268,7 @@ pub fn load_settings(
     Ok(settings)
 }
 pub fn write_settings(settings: &Settings) -> Result<(), LoadSettingsError> {
-    let path = settings_path()?;
+    let path = get_settings_path()?;
     write_settings_to(path, settings)
 }
 pub fn write_settings_to(
@@ -299,6 +347,14 @@ pub fn parse_line(line: &str, settings: &mut Settings) -> Result<(), LoadSetting
             expect_tag("\"")(value)?;
             settings.theme = theme;
         }
+        "light_text_gamma" => {
+            let value = splits.next().ok_or(NoValue)?.trim();
+            settings.light_text_gamma = parse_text_gamma(value)?;
+        }
+        "dark_text_gamma" => {
+            let value = splits.next().ok_or(NoValue)?.trim();
+            settings.dark_text_gamma = parse_text_gamma(value)?;
+        }
 
         x => return Err(UnknownKey(x.into())),
     }
@@ -326,6 +382,18 @@ pub fn parse_theme(value: &str) -> Result<(&str, ThemePreference), LoadSettingsE
     }
     Err(BadValue { value: value.into(), inner: Box::new(BadTheme) })
 }
+pub fn parse_text_gamma(value: &str) -> Result<TextGamma, LoadSettingsError> {
+    // can be an f32 or "dark-special" (with quotes)
+    if let Some(res) = value.strip_prefix("\"") {
+        let res = expect_tag("dark-special")(res)?;
+        let _res = expect_tag("\"")(res)?;
+        Ok(TextGamma::DarkSpecial)
+    } else {
+        let gamma = str::parse::<f32>(value)
+            .map_err(|x| LoadSettingsError::BadValue { value: value.into(), inner: Box::new(x) })?;
+        Ok(TextGamma::Gamma(gamma))
+    }
+}
 pub fn parse_tracing_level(value: &str) -> Result<(&str, SelfTracingLevel), LoadSettingsError> {
     use LoadSettingsError::*;
     if let Some(s) = value.strip_prefix("disabled") {
@@ -348,10 +416,17 @@ pub fn parse_tracing_level(value: &str) -> Result<(&str, SelfTracingLevel), Load
     }
     Err(BadValue { value: value.into(), inner: Box::new(BadSelfTracingLevel) })
 }
+
 pub fn apply_settings(ctx: &Context, app: &mut App) {
     if let SettingsState::Loaded(ref inner) = app.settings {
         ctx.set_pixels_per_point(inner.settings.ui_scale);
         ctx.set_theme(inner.settings.theme);
+        ctx.style_mut_of(egui::Theme::Light, |x| {
+            x.visuals.text_alpha_from_coverage = (&inner.settings.light_text_gamma).into()
+        });
+        ctx.style_mut_of(egui::Theme::Dark, |x| {
+            x.visuals.text_alpha_from_coverage = (&inner.settings.dark_text_gamma).into()
+        });
         match app.self_tracing_state {
             SelfTracingState::Disabled => {
                 if !matches!(inner.settings.self_tracing, SelfTracingLevel::Disabled) {
@@ -408,146 +483,7 @@ pub fn settings_dialog(ctx: &Context, app: &mut App) {
                     ui.spinner();
                 }
                 SettingsDialogState::None => (),
-                SettingsDialogState::Some { ref mut settings_clone, ref settings_path } => {
-                    egui::warn_if_debug_build(ui);
-                    let padding = 4.0;
-                    let body_size = TextStyle::Body.resolve(ui.style()).size;
-                    ui.label(RichText::new("Saved settings").size(body_size * 1.2));
-                    let settings_path: &str = settings_path.as_ref();
-                    ui.label(RichText::new(format!(
-                        "These settings are saved to the configuration file at\n`{settings_path}`"
-                    )));
-                    ui.allocate_space(vec2(2.0, padding));
-                    let theme_resp = ui
-                        .horizontal(|ui| {
-                            ui.label("Theme: ");
-                            theme_preference_buttons(ui, &mut settings_clone.theme)
-                        })
-                        .inner
-                        .response;
-                    ui.horizontal(|ui| {
-                        ui.label("UI scale: ");
-                        ui.style_mut().spacing.slider_width = theme_resp.rect.width() - 52.0;
-                        ui.add(egui::Slider::new(&mut settings_clone.ui_scale, 1.0..=5.0));
-                    });
-                    ui.label("Self-Tracing: ");
-                    left_stroke_frame(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Save self-trace: ");
-                            ui.checkbox(&mut settings_clone.save_self_trace, ());
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Level: ");
-                            egui::ComboBox::from_id_salt("self_tracing_level")
-                                .selected_text(format!("{:?}", settings_clone.self_tracing))
-                                .show_ui(ui, |ui| {
-                                    use SelfTracingLevel::*;
-                                    for value in [Disabled, Trace, Debug, Info, Warn, Error] {
-                                        let repr = value.repr_first_up();
-                                        ui.selectable_value(
-                                            &mut settings_clone.self_tracing,
-                                            value,
-                                            repr,
-                                        );
-                                    }
-                                });
-                        });
-                        if let SelfTracingState::Enabled(ref x) = app.self_tracing_state {
-                            ui.horizontal(|ui| {
-                                ui.label("Currently saving trace?: ");
-                                ui.code(x.saving.to_string())
-                            });
-                            let pr = x.path.read().unwrap();
-                            if let Some(ref y) = *pr {
-                                ui.horizontal(|ui| {
-                                    ui.label("Path: ");
-                                    ui.code(y);
-                                });
-                                if ui.button("Open in new window").clicked() {
-                                    info!("Opening self-trace in new window");
-                                    if let Some(argv0) = std::env::args().next() {
-                                        if let Err(x) = Command::new(argv0)
-                                            .args([y, "--option", "save_self_trace=false"])
-                                            .spawn()
-                                        {
-                                            app.notifier.error(format!(
-                                                "Failed to spawn new instance: {x}"
-                                            ));
-                                        }
-                                    } else {
-                                        app.notifier
-                                            .error("Cannot open self-trace, argv[0] is not set.");
-                                    }
-                                };
-                            }
-                        }
-                    });
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                        if ui.button("Save").clicked()
-                            && let Err(x) =
-                                write_settings(settings_clone).context("Failed to write settings")
-                        {
-                            let f = format!("{x:?}");
-                            println!("{f}");
-                            app.notifier.error(f);
-                        }
-                    });
-                    ui.separator();
-                    ui.label(RichText::new("Ephemeral settings").size(body_size * 1.2));
-                    ui.label(RichText::new(
-                        "These settings only affect the current instance of the program, and are \
-                         not saved",
-                    ));
-                    ui.allocate_space(vec2(2.0, padding));
-                    let mut temp = app.frame_time_tracker.is_some();
-                    let checkbox_resp = ui.checkbox(&mut temp, "Track FPS");
-                    if checkbox_resp.changed() {
-                        if temp {
-                            info!("Enabled frame time tracking");
-                            app.frame_time_tracker =
-                                FrameTimeTracker::Culled(SamplingFrameTracker::new())
-                        } else {
-                            info!("Disabled frame time tracking");
-                            app.frame_time_tracker = FrameTimeTracker::Dummy
-                        }
-                    }
-                    if app.frame_time_tracker.is_some() {
-                        ui.checkbox(&mut app.ephemeral_settings.fps_in_menu, "FPS in menu");
-                    }
-                    if let Some(avg_time_us) = app.frame_time_tracker.get_average_us() {
-                        ui.horizontal(|ui| {
-                            ui.label("Average frame time:");
-                            ui.label(us_to_human(avg_time_us));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Calculated FPS: ");
-                            let fps = (1000000.0 / avg_time_us as f64) as u64;
-                            ui.label(format!("{fps} FPS"));
-                        });
-                    }
-                    ui.separator();
-                    ui.collapsing("Developer tools", |ui| {
-                        if ui.button("Send long notification").clicked() {
-                            let mut q = "Hello\n".repeat(5);
-                            q.pop();
-                            app.notifier.error(q);
-                        }
-                        ui.checkbox(&mut app.ephemeral_settings.demo_mode, "Demo mode");
-                        #[allow(clippy::single_element_loop)]
-                        for benchmark in [&mut app.benchmarks.get_tree] {
-                            let mut enabled = benchmark.enabled;
-                            ui.checkbox(&mut enabled, format!("Benchmark {}", benchmark.name));
-                            benchmark.enabled = enabled;
-                            if enabled && let Some(avg_time) = benchmark.get_average_us() {
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("Average {} time: ", benchmark.name));
-                                    ui.label(us_to_human_u64(avg_time));
-                                });
-                            }
-                        }
-                    });
-                }
+                SettingsDialogState::Some { .. } => settings_dialog_inner(ui, app),
             }
         });
         if !settings_open {
@@ -556,23 +492,179 @@ pub fn settings_dialog(ctx: &Context, app: &mut App) {
     }
 }
 
+fn settings_dialog_inner(ui: &mut Ui, app: &mut App) {
+    let SettingsDialogState::Some { ref mut settings_clone, ref settings_path } =
+        app.settings_dialog
+    else {
+        unreachable!()
+    };
+    egui::warn_if_debug_build(ui);
+    let padding = 4.0;
+    let body_size = TextStyle::Body.resolve(ui.style()).size;
+    ui.label(RichText::new("Saved settings").size(body_size * 1.2));
+    ui.label(RichText::new(format!(
+        "These settings are saved to the configuration file at\n`{}`",
+        **settings_path
+    )));
+    ui.allocate_space(vec2(2.0, padding));
+    let theme_resp = ui
+        .horizontal(|ui| {
+            ui.label("Theme: ");
+            theme_preference_buttons(ui, &mut settings_clone.theme)
+        })
+        .inner
+        .response;
+    ui.horizontal(|ui| {
+        ui.label("UI scale: ");
+        ui.style_mut().spacing.slider_width = theme_resp.rect.width() - 52.0;
+        ui.add(egui::Slider::new(&mut settings_clone.ui_scale, 1.0..=5.0));
+    });
+    ui.label("Self-Tracing: ");
+    left_stroke_frame(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Save self-trace: ");
+            ui.checkbox(&mut settings_clone.save_self_trace, ());
+        });
+        ui.horizontal(|ui| {
+            ui.label("Level: ");
+            egui::ComboBox::from_id_salt("self_tracing_level")
+                .selected_text(format!("{:?}", settings_clone.self_tracing))
+                .show_ui(ui, |ui| {
+                    use SelfTracingLevel::*;
+                    for value in [Disabled, Trace, Debug, Info, Warn, Error] {
+                        let repr = value.repr_first_up();
+                        ui.selectable_value(&mut settings_clone.self_tracing, value, repr);
+                    }
+                });
+        });
+        if let SelfTracingState::Enabled(ref x) = app.self_tracing_state {
+            ui.horizontal(|ui| {
+                ui.label("Currently saving trace?: ");
+                ui.code(x.saving.to_string())
+            });
+            if let Some(ref y) = *x.path.read().unwrap() {
+                ui.horizontal(|ui| {
+                    ui.label("Path: ");
+                    ui.code(y);
+                });
+                if ui.button("Open in new window").clicked() {
+                    info!("Opening self-trace in new window");
+                    if let Some(argv0) = std::env::args().next() {
+                        if let Err(x) = Command::new(argv0)
+                            .args([y, "--option", "save_self_trace=false"])
+                            .spawn()
+                        {
+                            app.notifier.error(format!("Failed to spawn new instance: {x}"));
+                        }
+                    } else {
+                        app.notifier.error("Cannot open self-trace, argv[0] is not set.");
+                    }
+                };
+            }
+        }
+    });
+
+    ui.label("Text rendering:");
+    left_stroke_frame(ui, |ui| {
+        pub fn text_gamma_ui(ui: &mut Ui, tg: &mut TextGamma) {
+            let initial_dark_special = *tg == TextGamma::DarkSpecial;
+            let mut dark_special = initial_dark_special;
+            ui.checkbox(&mut dark_special, "Dark-mode special");
+            if dark_special != initial_dark_special {
+                *tg = if dark_special { TextGamma::DarkSpecial } else { TextGamma::Gamma(1.0) };
+            }
+            if let TextGamma::Gamma(gamma) = tg {
+                ui.add(DragValue::new(gamma).speed(0.01).range(0.1..=4.0).prefix("Gamma: "));
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.label("Light mode:");
+            text_gamma_ui(ui, &mut settings_clone.light_text_gamma);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Dark mode:");
+            text_gamma_ui(ui, &mut settings_clone.dark_text_gamma);
+        });
+    });
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+        if ui.button("Save").clicked()
+            && let Err(x) = write_settings(settings_clone).context("Failed to write settings")
+        {
+            app.notifier.error(format!("{x:?}"));
+        }
+    });
+    ui.separator();
+    ui.label(RichText::new("Ephemeral settings").size(body_size * 1.2));
+    ui.label(RichText::new(
+        "These settings only affect the current instance of the program, and are not saved",
+    ));
+    ui.allocate_space(vec2(2.0, padding));
+    let mut temp = app.frame_time_tracker.is_some();
+    let checkbox_resp = ui.checkbox(&mut temp, "Track FPS");
+    if checkbox_resp.changed() {
+        if temp {
+            info!("Enabled frame time tracking");
+            app.frame_time_tracker = FrameTimeTracker::Culled(SamplingFrameTracker::new())
+        } else {
+            info!("Disabled frame time tracking");
+            app.frame_time_tracker = FrameTimeTracker::Dummy
+        }
+    }
+    if app.frame_time_tracker.is_some() {
+        ui.checkbox(&mut app.ephemeral_settings.fps_in_menu, "FPS in menu");
+    }
+    if let Some(avg_time_us) = app.frame_time_tracker.get_average_us() {
+        ui.horizontal(|ui| {
+            ui.label("Average frame time:");
+            ui.label(us_to_human(avg_time_us));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Calculated FPS: ");
+            let fps = (1000000.0 / avg_time_us as f64) as u64;
+            ui.label(format!("{fps} FPS"));
+        });
+    }
+    ui.separator();
+    ui.collapsing("Developer tools", |ui| {
+        if ui.button("Send long notification").clicked() {
+            let mut q = "Hello\n".repeat(5);
+            q.pop();
+            app.notifier.error(q);
+        }
+        ui.checkbox(&mut app.ephemeral_settings.demo_mode, "Demo mode");
+
+        #[allow(clippy::single_element_loop)]
+        for benchmark in [&mut app.benchmarks.get_tree] {
+            ui.checkbox(&mut benchmark.enabled, format!("Benchmark {}", benchmark.name));
+            if benchmark.enabled
+                && let Some(avg_time) = benchmark.get_average_us()
+            {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Average {} time: ", benchmark.name));
+                    ui.label(us_to_human_u64(avg_time));
+                });
+            }
+        }
+    });
+}
+
 /// Used as a general indicator for a group of settings.
 pub fn left_stroke_frame<Q>(
     ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> Q,
 ) -> InnerResponse<Q> {
     let m = Margin { left: 8, right: 0, top: 0, bottom: 0 };
-    let st_frame = egui::Frame::new().outer_margin(m).show(ui, add_contents);
-    let interact = ui.style().interact(&st_frame.response);
-    let stroke_rect_min = st_frame.response.rect.min;
+    let frame = egui::Frame::new().outer_margin(m).show(ui, add_contents);
+    let interact = ui.style().interact(&frame.response);
+    let stroke_rect_min = frame.response.rect.min;
     let stroke_rect_max =
-        pos2(stroke_rect_min.x + interact.bg_stroke.width, st_frame.response.rect.max.y);
-    let stroke_rect = rect!(stroke_rect_min, stroke_rect_max);
-    ui.painter().add(RectShape::filled(
-        stroke_rect,
+        pos2(stroke_rect_min.x + interact.bg_stroke.width, frame.response.rect.max.y);
+
+    ui.painter().rect_filled(
+        rect!(stroke_rect_min, stroke_rect_max),
         0.0,
         interact.bg_stroke.color.lerp_to_gamma(Color32::BLACK, 0.25),
-    ));
-    st_frame
+    );
+    frame
 }
 
 /// theme_preference.show_radio_buttons, but we capture the response

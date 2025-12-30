@@ -1,14 +1,12 @@
-use std::{cmp::min, fmt::Write, ops::Range};
-
+use crate::{
+    App, LogState, LogStatus,
+    homepage::{SpanContext, span},
+    search::{Query, QueryError, QueryResult, QueryTiming, search_settings_dialog},
+};
 use egui::{Context, Layout, ScrollArea, Ui, Vec2, Widget};
 use entrace_core::display_error_context;
+use std::{cmp::min, fmt::Write, ops::Range};
 use tracing::{error, info};
-
-use crate::{
-    App, LogState, LogStatus, SpanContext,
-    search::{Query, QueryError, QueryResult, QueryTiming, search_settings_dialog},
-    span,
-};
 
 pub fn query_windows(ui: &mut Ui, ctx: &Context, app: &mut App) {
     search_settings_dialog(ui, &mut app.search_state);

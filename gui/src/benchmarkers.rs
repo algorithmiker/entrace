@@ -40,7 +40,7 @@ impl<const N: u8> SamplingBenchmark<N> {
         if !self.enabled {
             return;
         };
-        if self.cnt % N == 0 {
+        if self.cnt.is_multiple_of(N) {
             self.cur_start = Some(Instant::now());
         }
         self.cnt = self.cnt.wrapping_add(1);

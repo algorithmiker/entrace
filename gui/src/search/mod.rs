@@ -11,13 +11,13 @@ use std::{
 };
 
 use crate::{
-    LogState, TraceProvider, notifications::draw_x, rect, search::query_window::PaginatedResults,
-    spawn_task,
+    LogState, TraceProvider, icon_colored, notifications::draw_x, rect,
+    search::query_window::PaginatedResults, spawn_task,
 };
 use crossbeam::channel::Receiver;
 use egui::{
-    Color32, CornerRadius, Margin, Pos2, Rect, Response, RichText, Sense, Separator, Shape, Stroke,
-    TextEdit, Ui, epaint::RectShape, pos2, vec2,
+    Color32, CornerRadius, Margin, Pos2, Rect, Response, Sense, Separator, TextEdit, Ui,
+    epaint::RectShape, pos2, vec2,
 };
 use entrace_query::{QueryError, lua_api::setup_lua_on_arc_rwlock};
 use mlua::{FromLua, Lua, Value};
@@ -289,14 +289,14 @@ pub fn bottom_panel_ui(
     fn paint_label(
         ui: &mut Ui, bg_rect: Rect, bg_corner_radius: CornerRadius, inner_rect: Rect,
         label_callback: impl FnOnce(&mut Ui, Color32), on_click: impl FnOnce(Response),
+        hover_text: Option<&str>,
     ) {
-        let resp = ui.allocate_rect(inner_rect, Sense::click());
+        let mut resp = ui.allocate_rect(inner_rect, Sense::click());
+        if let Some(x) = hover_text {
+            resp = resp.on_hover_text(x);
+        }
         if resp.hovered() {
-            ui.painter().add(RectShape::filled(
-                bg_rect,
-                bg_corner_radius,
-                Color32::GRAY.gamma_multiply(0.5),
-            ));
+            ui.painter().rect_filled(bg_rect, bg_corner_radius, Color32::GRAY.gamma_multiply(0.5));
         }
 
         let interact_style = ui.style().interact(&resp);
@@ -310,10 +310,11 @@ pub fn bottom_panel_ui(
         bg_left,
         bg_corner_radius,
         inner_left,
-        |ui, color| draw_triangle(ui.painter(), inner_left.center() + vec2(2.0, 0.0), 12.0, color),
-        |_resp| {
-            search_state.new_query(log_state.trace_provider.clone());
+        |ui, color| {
+            ui.put(inner_left, icon_colored!("../../vendor/icons/play_arrow.svg", color));
         },
+        |_| search_state.new_query(log_state.trace_provider.clone()),
+        Some("Run (Ctrl+Enter)"),
     );
     let middle_min = inner_right.min - vec2(2.0, -2.0);
     let middle_max = inner_left.max + vec2(2.0, -2.0);
@@ -325,33 +326,15 @@ pub fn bottom_panel_ui(
         CornerRadius::ZERO,
         inner_right,
         |ui, color| {
-            ui.put(
-                inner_right,
-                egui::Label::new(
-                    RichText::new(egui_material_icons::icons::ICON_SETTINGS).color(color),
-                )
-                .selectable(false),
-            );
+            ui.put(inner_right, icon_colored!("../../vendor/icons/settings.svg", color));
         },
-        |_resp| {
+        |_| {
             info!(settings_btn_rect = ?inner_right, "Query settings icon clicked");
             search_state.settings.data =
                 QuerySettingsDialogData::Open { settings_button_rect: inner_right, position: None }
         },
+        None,
     );
-}
-fn draw_triangle(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
-    let half_size = size * 0.5;
-    let quarter_size = size * 0.25;
-    let points = vec![
-        pos2(center.x - half_size * 0.75, center.y - half_size * 0.75),
-        pos2(center.x + quarter_size, center.y),
-        pos2(center.x - half_size * 0.75, center.y + half_size * 0.75),
-    ];
-
-    let triangle = Shape::convex_polygon(points, color, Stroke::NONE);
-
-    painter.add(triangle);
 }
 pub struct LocatingStarted {
     pub target: u32,

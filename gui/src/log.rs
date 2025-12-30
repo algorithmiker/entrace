@@ -84,12 +84,16 @@ impl LogState {
         };
         self.tree_view.update_tree(Some(tree_benchmark), std::iter::once(0), ctx);
     }
-    pub fn on_frame(&self, notifier: &impl Notify) {
+    /// Returns the delta in the trace provider's item count
+    pub fn on_frame(&self, notifier: &impl Notify) -> usize {
+        let mut delta = 0;
         if let Ok(mut q) = self.trace_provider.try_write() {
+            let len0 = q.len();
             q.frame_callback();
+            delta = q.len().saturating_sub(len0);
         } else {
             trace!(
-                "Cannot acquire write lock on trace provider, next frame_callback will be delayed"
+                "Can't acquire write lock on trace provider, next frame_callback will be delayed"
             )
         }
         if let Some(ref rx) = self.event_rx {
@@ -100,5 +104,7 @@ impl LogState {
                 }
             }
         }
+
+        delta
     }
 }

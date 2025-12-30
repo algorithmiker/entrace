@@ -87,7 +87,7 @@ impl TrackFrameTime for SamplingFrameTracker {
     }
 
     fn start_frame(&mut self) {
-        if self.cnt % 16 == 0 {
+        if self.cnt.is_multiple_of(16) {
             self.cur_start = Some(Instant::now());
         }
         self.cnt = self.cnt.wrapping_add(1);

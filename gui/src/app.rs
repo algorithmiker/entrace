@@ -20,15 +20,15 @@ use rfd::FileDialog;
 use tracing::info;
 
 use crate::{
-    FilePickerState, LogState, LogStatus,
+    LogState, LogStatus,
     benchmarkers::BenchmarkManager,
-    center,
     cmdline::Cmdline,
     connection_dialog::{ConnectionDialog, connect_dialog},
     convert_dialog::{self, ConvertDialogState},
     enbitvec::EnBitVec,
     ephemeral_settings::EphemeralSettings,
     frame_time::{FrameTimeTracker, TrackFrameTime, us_to_human},
+    homepage::center,
     notifications::{self, NotificationHandle, RefreshToken},
     row_height_from_ctx,
     search::{self, LocatingState, SearchState, query_window::query_windows},
@@ -74,6 +74,12 @@ impl Default for App {
 impl App {
     // called before the first frame
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        #[cfg(feature = "dev")]
+        {
+            let ctx = cc.egui_ctx.clone();
+            subsecond::register_handler(Arc::new(move || ctx.request_repaint()));
+        }
+
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
         cc.egui_ctx.options_mut(|x| x.fallback_theme = Theme::Light);
@@ -124,7 +130,6 @@ impl App {
                 priority: egui::epaint::text::FontPriority::Highest,
             }],
         ));
-        egui_material_icons::initialize(&cc.egui_ctx);
         app
     }
 
@@ -143,7 +148,7 @@ impl App {
                     presentation,
                 },
             };
-            let trace = time_print("(starting) loading trace", || unsafe {
+            let trace = time_print("loading trace", || unsafe {
                 entrace_core::load_trace(path, load_config)
             });
             match trace {
@@ -165,16 +170,8 @@ impl App {
             }
         });
     }
-}
-// simple right now, but might get replaced by a thread pool later.
-pub fn spawn_task(f: impl FnOnce() + Send + 'static) {
-    std::thread::spawn(f);
-}
-impl eframe::App for App {
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {}
-    fn save(&mut self, _storage: &mut dyn eframe::Storage) {}
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    pub fn update_inner(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame_time_tracker.start_frame();
         match self.settings {
             SettingsState::None => (),
@@ -255,7 +252,7 @@ impl eframe::App for App {
                             self.settings_dialog = SettingsDialogState::Some {
                                 settings_clone: inner.settings.clone(),
                                 settings_path: LazyCell::new(|| {
-                                    settings::settings_path()
+                                    settings::get_settings_path()
                                         .map(|x| x.to_string_lossy().into_owned())
                                         .unwrap_or("unknown".into())
                                 }),
@@ -319,6 +316,32 @@ impl eframe::App for App {
         self.frame_time_tracker.end_frame();
     }
 }
+// simple right now, but might get replaced by a thread pool later.
+pub fn spawn_task(f: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(f);
+}
+impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {}
+    fn save(&mut self, _storage: &mut dyn eframe::Storage) {}
+
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        #[cfg(feature = "dev")]
+        {
+            return subsecond::call(|| {
+                self.update_inner(ctx, frame);
+            });
+        }
+        self.update_inner(ctx, frame);
+    }
+}
+
+#[derive(Default)]
+pub enum FilePickerState {
+    #[default]
+    NoPick,
+    Picking(Arc<RwLock<Option<PathBuf>>>),
+}
+
 pub struct AboutState {
     pub open: bool,
     pub text: LazyCell<Arc<RichText>>,

@@ -4,7 +4,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use egui::{Color32, FontId, Pos2, Sense, Stroke, TextStyle, UiBuilder, pos2, vec2};
+use egui::{
+    Color32, FontId, Pos2, Rect, Sense, Stroke, TextStyle, UiBuilder, Vec2, epaint::RectShape,
+    pos2, vec2,
+};
 use entrace_core::{
     LevelContainer,
     remote::{Notify, Refresh},
@@ -93,8 +96,8 @@ pub fn notifications(ui: &mut egui::Ui, app: &mut App) -> egui::InnerResponse<()
     drop(handle);
     let handle = app.notifier.0.read().unwrap();
     // TODO: this allocates each frame. we could skip it
-    // TODO: ideally we would be doing our own layout here
     let mut to_remove = vec![];
+    // TODO: ideally we would be doing our own layout here
     let r = ui.with_layout(egui::Layout::bottom_up(egui::Align::Max), |ui| {
         let font_id = TextStyle::resolve(&TextStyle::Body, ui.style());
         fn paint_notification(
@@ -120,16 +123,18 @@ pub fn notifications(ui: &mut egui::Ui, app: &mut App) -> egui::InnerResponse<()
                 + item_spacing.y;
             let frame_space = ui.allocate_space(vec2(frame_width, frame_height));
             let frame_rect = frame_space.1;
-            ui.painter().rect_filled(frame_rect, 0, repr.1);
+
+            let shadow = ui.style().visuals.popup_shadow.as_shape(frame_rect, 0);
+            ui.painter().add(shadow);
+            ui.painter().add(RectShape::filled(frame_rect, 0, repr.1));
 
             let s_min = frame_rect.min + item_spacing;
-            let s_max = s_min + severity_galley_size;
-            let severity_rect = rect!(s_min, s_max);
+            let severity_rect = Rect::from_min_size(s_min, severity_galley_size);
             ui.scope_builder(
                 UiBuilder::new()
                     .max_rect(severity_rect)
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                |ui| ui.add(egui::Label::new(repr.0)),
+                |ui| ui.label(repr.0),
             );
 
             let text_rect_min =
@@ -141,8 +146,7 @@ pub fn notifications(ui: &mut egui::Ui, app: &mut App) -> egui::InnerResponse<()
             let x_size = severity_galley_size.y;
             let x_min =
                 pos2(frame_rect.max.x - x_size - item_spacing.x, frame_rect.min.y + item_spacing.y);
-            let x_max = x_min + vec2(x_size, x_size);
-            let x_bg_rect = rect!(x_min, x_max);
+            let x_bg_rect = Rect::from_min_size(x_min, Vec2::splat(x_size));
             let x_bg_resp = ui.allocate_rect(x_bg_rect, Sense::CLICK | Sense::HOVER);
             let thickness = if x_bg_resp.hovered() { 2.5 } else { 2.0 };
             let size = if x_bg_resp.hovered() { x_size / 1.5 } else { x_size / 2.0 };
