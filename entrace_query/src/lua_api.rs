@@ -5,7 +5,10 @@ use std::{
     error::Error,
     ops::RangeInclusive,
     rc::Rc,
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        atomic::{self, AtomicBool, AtomicUsize},
+    },
     time::Instant,
 };
 
@@ -804,6 +807,7 @@ pub fn en_filterset_materialize(
         Ok(table)
     }
 }
+
 struct DynAdapter<'a>(&'a dyn LogProvider);
 impl<'a> LogProvider for DynAdapter<'a> {
     fn children(&self, x: u32) -> Result<&[u32], LogProviderError> {
@@ -831,8 +835,57 @@ impl<'a> LogProvider for DynAdapter<'a> {
     }
 }
 
+pub struct JoinCtx {
+    is_joining: AtomicBool,
+    threads_joined: AtomicUsize,
+    thread_count: usize,
+    results: RwLock<Vec<u32>>,
+}
+impl JoinCtx {
+    pub fn from_thread_count(thread_count: usize) -> Self {
+        JoinCtx {
+            is_joining: false.into(),
+            threads_joined: 0.into(),
+            thread_count,
+            results: RwLock::new(vec![]),
+        }
+    }
+}
+
+/// en_join lets you switch from N threads to one thread.
+/// all threads which reach the en_join point will be shut down, except for the last one.
+/// the last one gets all the ids from other threads.
+///
+/// This is useful for map-reduce type computations where the first part of the operation can be
+/// parallelized, but we need serial execution on the last part;
+/// for example if you want to sort the returned spans.
+pub fn en_join(joinable: Arc<JoinCtx>) -> impl Fn(Table) -> LogProviderResult<Vec<u32>> {
+    move |results: Table| {
+        joinable.is_joining.store(true, atomic::Ordering::Release);
+        let joined_cnt = joinable.threads_joined.fetch_add(1, atomic::Ordering::AcqRel) + 1;
+        if joined_cnt < joinable.thread_count {
+            // this is not the last thread  to finish, so we shut down
+            let mut all_results_w = joinable.results.write().unwrap();
+            // this is what FromLua<Vec<u32>> would do too, but we do it directly on the table to
+            // avoid copying twice.
+            all_results_w.extend(results.sequence_values::<u32>().filter_map(|x| x.ok()));
+            drop(all_results_w);
+            return Err(LogProviderError::JoinShutdown);
+        }
+        // last thread, this one keeps running
+
+        // reset join state
+        joinable.is_joining.store(false, atomic::Ordering::Release);
+        joinable.threads_joined.store(0, atomic::Ordering::Release);
+        let mut all_results = joinable.results.write().unwrap();
+        let mut old_results = std::mem::take(&mut *all_results);
+        old_results.extend(results.sequence_values::<u32>().filter_map(|x| x.ok()));
+        Ok(old_results)
+    }
+}
+
 macro_rules! lua_setup_with_wrappers {
-    ($lua: expr, $trace: expr, $finder_cache: expr, $range: expr, $lua_wrap: ident, $lua_wrap2: ident) => {
+    ($lua: expr, $trace: expr, $finder_cache: expr, $join_ctx: expr, $range: expr, $lua_wrap: ident, $lua_wrap2: ident) => {
         let globals = $lua.globals();
         let en_range = $lua.create_function(move |_state, _: ()| en_span_range(&$range));
         globals.set("en_span_range", en_range?)?;
@@ -898,11 +951,18 @@ macro_rules! lua_setup_with_wrappers {
             "en_filterset_materialize",
             $lua.create_function($lua_wrap2!(t, Table, en_filterset_materialize))?,
         )?;
+        let join_fn = en_join($join_ctx);
+        globals.set(
+            "en_join",
+            $lua.create_function(move |_: &Lua, results: Table| {
+                join_fn(results).map_err(to_lua_err)
+            })?,
+        )?;
     };
 }
 pub fn setup_lua_on_arc_rwlock(
     lua: &mut Lua, range: RangeInclusive<u32>, trace: Arc<RwLock<TraceProvider>>,
-    finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>,
+    finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>, join_ctx: Arc<JoinCtx>,
 ) -> Result<(), mlua::Error> {
     /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
     /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
@@ -938,13 +998,14 @@ pub fn setup_lua_on_arc_rwlock(
             en_contains_anywhere(&adapter, finder_cache.clone())((id, needle)).map_err(to_lua_err)
         })?,
     )?;
-    lua_setup_with_wrappers!(lua, trace, finder_cache, range, lua_wrap, lua_wrap2);
+
+    lua_setup_with_wrappers!(lua, trace, finder_cache, join_ctx, range, lua_wrap, lua_wrap2);
     Ok(())
 }
 
 pub fn setup_lua_no_lock(
     lua: &mut Lua, range: RangeInclusive<u32>, trace: Arc<TraceProvider>,
-    finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>,
+    finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>, join_ctx: Arc<JoinCtx>,
 ) -> Result<(), mlua::Error> {
     /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
     /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
@@ -977,6 +1038,6 @@ pub fn setup_lua_no_lock(
             en_contains_anywhere(&adapter, finder_cache.clone())((id, needle)).map_err(to_lua_err)
         })?,
     )?;
-    lua_setup_with_wrappers!(lua, trace, finder_cache, range, lua_wrap, lua_wrap2);
+    lua_setup_with_wrappers!(lua, trace, finder_cache, join_ctx, range, lua_wrap, lua_wrap2);
     Ok(())
 }
