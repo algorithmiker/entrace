@@ -59,29 +59,36 @@ fn deepcopy_table(lua: &Lua, table: Table) -> mlua::Result<Table> {
 fn to_lua_err(x: impl Error + Send + Sync + 'static) -> mlua::Error {
     x.into_lua_err()
 }
+#[doc = include_str!("../api-docs/en_pretty_table.md")]
 pub fn en_pretty_table(table: Table) -> mlua::Result<String> {
     Ok(format!("{table:#?}"))
 }
+#[doc = include_str!("../api-docs/en_span_range.md")]
 pub fn en_span_range(range: &RangeInclusive<u32>) -> mlua::Result<(u32, u32)> {
     Ok((*range.start(), *range.end()))
 }
+#[doc = include_str!("../api-docs/en_log.md")]
 pub fn en_log(x: mlua::Value) -> mlua::Result<()> {
     println!("Lua log: {x:?}");
     Ok(())
 }
 
+#[doc = include_str!("../api-docs/en_children.md")]
 pub fn en_children(tcc: &impl LogProvider) -> impl Fn(u32) -> Result<Vec<u32>, LogProviderError> {
     move |id: u32| tcc.children(id).map(|x| x.into())
 }
 
+#[doc = include_str!("../api-docs/en_child_cnt.md")]
 pub fn en_child_cnt(tcc: &impl LogProvider) -> impl Fn(u32) -> Result<usize, LogProviderError> {
     move |id: u32| Ok(tcc.children(id)?.len())
 }
 
+#[doc = include_str!("../api-docs/en_span_cnt.md")]
 pub fn en_span_cnt(tcc: &impl LogProvider) -> impl Fn(()) -> mlua::Result<usize> {
     move |_: ()| Ok(tcc.len())
 }
 
+#[doc = include_str!("../api-docs/en_metadata_table.md")]
 pub fn en_metadata_table(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> mlua::Result<Table> {
     move |id: u32| {
         let c = tcc.meta(id).map_err(to_lua_err)?;
@@ -98,12 +105,14 @@ pub fn en_metadata_table(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> m
     }
 }
 
+#[doc = include_str!("../api-docs/en_metadata_name.md")]
 pub fn en_metadata_name(
     tcc: &impl LogProvider,
 ) -> impl Fn(u32) -> Result<String, LogProviderError> {
     move |id: u32| Ok(tcc.meta(id)?.name.to_string())
 }
 
+#[doc = include_str!("../api-docs/en_metadata_level.md")]
 pub fn en_metadata_level(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult<u8> {
     move |id: u32| {
         let c = tcc.meta(id)?;
@@ -111,6 +120,7 @@ pub fn en_metadata_level(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderR
     }
 }
 
+#[doc = include_str!("../api-docs/en_metadata_file.md")]
 pub fn en_metadata_file(
     tcc: &impl LogProvider,
 ) -> impl Fn(u32) -> LogProviderResult<Option<String>> {
@@ -119,6 +129,7 @@ pub fn en_metadata_file(
         Ok(c.file.map(|x| x.to_owned()))
     }
 }
+#[doc = include_str!("../api-docs/en_metadata_line.md")]
 pub fn en_metadata_line(tcc: &impl LogProvider) -> impl Fn(u32) -> mlua::Result<Option<u32>> {
     move |id: u32| {
         let c = tcc.meta(id).map_err(to_lua_err)?;
@@ -126,6 +137,7 @@ pub fn en_metadata_line(tcc: &impl LogProvider) -> impl Fn(u32) -> mlua::Result<
     }
 }
 
+#[doc = include_str!("../api-docs/en_metadata_target.md")]
 pub fn en_metadata_target(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult<String> {
     move |id: u32| {
         let c = tcc.meta(id)?;
@@ -133,6 +145,7 @@ pub fn en_metadata_target(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProvider
     }
 }
 
+#[doc = include_str!("../api-docs/en_metadata_module_path.md")]
 pub fn en_metadata_module_path(
     tcc: &impl LogProvider,
 ) -> impl Fn(u32) -> LogProviderResult<Option<String>> {
@@ -142,6 +155,7 @@ pub fn en_metadata_module_path(
     }
 }
 
+#[doc = include_str!("../api-docs/en_attrs.md")]
 pub fn en_attrs(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> mlua::Result<Table> {
     move |id: u32| {
         let c = tcc.attrs(id).map_err(to_lua_err)?;
@@ -153,6 +167,7 @@ pub fn en_attrs(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> mlua::Resu
     }
 }
 
+#[doc = include_str!("../api-docs/en_attr_names.md")]
 pub fn en_attr_names(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn(u32) -> mlua::Result<Vec<mlua::Value>> {
@@ -166,6 +181,7 @@ pub fn en_attr_names(
     }
 }
 
+#[doc = include_str!("../api-docs/en_attr_values.md")]
 pub fn en_attr_values(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn(u32) -> mlua::Result<Vec<mlua::Value>> {
@@ -179,6 +195,7 @@ pub fn en_attr_values(
     }
 }
 
+#[doc = include_str!("../api-docs/en_attr_by_idx.md")]
 pub fn en_attr_by_idx(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, usize)) -> mlua::Result<(mlua::String, mlua::Value)> {
@@ -189,6 +206,7 @@ pub fn en_attr_by_idx(
     }
 }
 
+#[doc = include_str!("../api-docs/en_attr_by_name.md")]
 pub fn en_attr_by_name(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, String)) -> mlua::Result<mlua::Value> {
@@ -199,6 +217,7 @@ pub fn en_attr_by_name(
     }
 }
 
+#[doc = include_str!("../api-docs/en_attr_name.md")]
 pub fn en_attr_name(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, usize)) -> mlua::Result<mlua::String> {
@@ -209,6 +228,7 @@ pub fn en_attr_name(
     }
 }
 
+#[doc = include_str!("../api-docs/en_attr_value.md")]
 pub fn en_attr_value(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, usize)) -> mlua::Result<mlua::Value> {
@@ -219,6 +239,7 @@ pub fn en_attr_value(
     }
 }
 
+#[doc = include_str!("../api-docs/en_as_string.md")]
 pub fn en_as_string(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult<String> {
     move |id: u32| {
         let attrs = tcc.attrs(id)?;
@@ -237,6 +258,7 @@ pub fn en_as_string(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult
     }
 }
 
+#[doc = include_str!("../api-docs/en_contains_anywhere.md")]
 pub fn en_contains_anywhere(
     tcc: &impl LogProvider, finder_cache: Rc<RefCell<HashMap<String, Finder>>>,
 ) -> impl Fn((u32, String)) -> LogProviderResult<bool> {
@@ -369,15 +391,7 @@ pub fn span_matches_filter(
 //
 //   Valid item types are: "prim_list", "prim_range", "rel_dnf",
 //   "intersect", "union", "invert"
-
-/// en_filterset_from_list()
-///  input: list of ids
-///  outputs: a table with
-///    type: "filterset"
-///    root: 0
-///    items: {
-///      { type = "prim_list"; value = the list}
-///    }
+#[doc = include_str!("../api-docs/en_filterset_from_list.md")]
 pub fn en_filterset_from_list(lua: &Lua, t: Table) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
     fs.set("type", "filterset")?;
@@ -393,14 +407,7 @@ pub fn en_filterset_from_list(lua: &Lua, t: Table) -> mlua::Result<Table> {
     Ok(fs)
 }
 
-/// en_filterset_from_range()
-///  input: start, end
-///  outputs: a table with
-///    type: "filterset"
-///    root: 0
-///    items: {
-///      { type = "prim_range"; start = start, end=end}
-///    }
+#[doc = include_str!("../api-docs/en_filterset_from_range.md")]
 pub fn en_filterset_from_range(lua: &Lua, (start, end): (usize, usize)) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
     fs.set("type", "filterset")?;
@@ -417,14 +424,7 @@ pub fn en_filterset_from_range(lua: &Lua, (start, end): (usize, usize)) -> mlua:
     Ok(fs)
 }
 
-/// en_filter()
-/// input:
-///   filter: table with
-///     target: name of variable eg. "message" or "meta.filename"
-///     relation: a relation, one of "EQ", "LT", "GT"
-///     value: a constant to compare with
-///   src: filterset
-/// outputs: { type = "filterset", root = 1, items = { src = 0, {type = "rel_dnf", src = 0, clauses = {{ target, relation, value}} }}},
+#[doc = include_str!("../api-docs/en_filter.md")]
 pub fn en_filter(lua: &Lua, (filter, src): (Table, Table)) -> mlua::Result<Table> {
     let old_items: Table = src.get("items")?;
     let items_len = old_items.len()?;
@@ -488,40 +488,7 @@ fn concat_items_lists(lua: &Lua, filters: Table) -> mlua::Result<(Table, Vec<i64
 
     Ok((all_items, srcs))
 }
-/// en_filterset_union()
-/// input:
-///   filters: a list of filtersets, e. g
-///   {
-///     { type: "filterset",
-///       root: 1,
-///       items: {
-///         { type = "prim_list", value = {1,2,3}},
-///         { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
-///       }
-///     }
-///     { type: "filterset",
-///       root: 1,
-///       items: {
-///         {type: "prim_list", value = {1,2,3} },
-///         {type: "rel", target = "b", relation = "EQ", value = "1", src = 0},
-///       }
-///     }
-///   }
-/// outputs: a filterset that matches an item if it is in any input filterset.
-/// This does NOT deduplicate any items, eg. for the given inputs, the result would be as follows.
-/// Note that en_materialize() MAY deduplicate, but there is no guarantee it will.
-/// { type: "filterset",
-///   root: 4,
-///   items: {
-///     { type = "prim_list", value = {1,2,3}},
-///     { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
-///     { type: "prim_list", value = {1,2,3}},
-///     { type: "rel", target = "b", relation = "EQ", value = "1", src = 2 },
-///     { type: "union", srcs = { 1, 3 }}
-/// }
-///
-/// Note: if you are unioning filters on the same source filterset, en_filter_any will likely
-/// be faster.
+#[doc = include_str!("../api-docs/en_filterset_union.md")]
 pub fn en_filterset_union(lua: &Lua, filters: Table) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
     fs.set("type", "filterset")?;
@@ -535,40 +502,7 @@ pub fn en_filterset_union(lua: &Lua, filters: Table) -> mlua::Result<Table> {
     Ok(fs)
 }
 
-/// en_filterset_intersect()
-/// input:
-///   filters: a list of filtersets, e. g
-///   {
-///     { type: "filterset",
-///       root: 1,
-///       items: {
-///         { type = "prim_list", value = {1,2,3}},
-///         { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
-///       }
-///     }
-///     { type: "filterset",
-///       root: 1,
-///       items: {
-///         {type: "prim_list", value = {1,2,3} },
-///         {type: "rel", target = "b", relation = "EQ", value = "1", src = 0},
-///       }
-///     }
-///   }
-/// outputs: a filterset that matches an item if it is in all input filtersets.
-/// This does NOT deduplicate any items, eg. for the given inputs, the result would be as follows.
-/// Note that en_materialize() MAY deduplicate, but there is no guarantee it will. (it currently
-/// doesn't, because an acyclic graph is required for evauator correctness, this might change).
-/// { type: "filterset",
-///   root: 4,
-///   items: {
-///     { type = "prim_list", value = {1,2,3}},
-///     { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
-///     { type: "prim_list", value = {1,2,3}},
-///     { type: "rel", target = "b", relation = "EQ", value = "1", src = 2 },
-///     { type: "intersect", srcs = { 1, 3 }}
-/// }
-/// Note: if you are intersecting filters on the same source filterset, en_filter_all will likely
-/// be faster.
+#[doc = include_str!("../api-docs/en_filterset_intersect.md")]
 pub fn en_filterset_intersect(lua: &Lua, filters: Table) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
     fs.set("type", "filterset")?;
@@ -583,37 +517,7 @@ pub fn en_filterset_intersect(lua: &Lua, filters: Table) -> mlua::Result<Table> 
     Ok(fs)
 }
 
-/// en_filterset_dnf()
-/// input:
-///   filters: a list of list of filter descriptions, which is interpreted as a DNF clause list.
-///   (this example would be (a=1 AND c=0) OR (b=1)
-///   {
-///     {
-///       { target = "a", relation = "EQ", value = "1", src = 0 },
-///       { target = "c", relation = "EQ", value = "0", src = 0 },
-///     }
-///     {
-///       { target = "b", relation = "EQ", value = "1", src = 0},
-///     }
-///   }
-///   source: a filterset
-/// outputs: a filterset that matches an item if satisfies either of the AND clauses
-/// { type: "filterset",
-///   root: 1,
-///   items: {
-///     { type = "prim_list", value = {1,2,3}},
-///     { type = "rel_dnf", src = 0,
-///       clauses = {
-///         {
-///           { target = "a", relation = "EQ", value = "1", src = 0 },
-///           { target = "c", relation = "EQ", value = "0", src = 0 },
-///         }
-///         {
-///           { target = "b", relation = "EQ", value = "1", src = 0},
-///         }
-///       }
-///     }
-/// }
+#[doc = include_str!("../api-docs/en_filterset_dnf.md")]
 pub fn en_filterset_dnf(lua: &Lua, (clauses, src): (Table, Table)) -> mlua::Result<Table> {
     let new_fs = deepcopy_table(lua, src)?;
     let old_root: usize = new_fs.get("root")?;
@@ -628,9 +532,7 @@ pub fn en_filterset_dnf(lua: &Lua, (clauses, src): (Table, Table)) -> mlua::Resu
     Ok(new_fs)
 }
 
-/// en_filterset_not()
-/// input: filterset
-/// outputs: a filterset that matches an item exactly if it is not in the filterset.
+#[doc = include_str!("../api-docs/en_filterset_not.md")]
 pub fn en_filterset_not(lua: &Lua, filterset: Table) -> mlua::Result<Table> {
     let new_fs = deepcopy_table(lua, filterset)?;
     let not = lua.create_table()?;
@@ -778,9 +680,7 @@ impl<L: LogProvider> Matcher<EnValue> for EnMatcher<'_, L> {
         res
     }
 }
-/// Materialize a filterset; which means going from the lazy representation of filters as a series
-/// of operations into a concrete list of matching indices.
-/// In some lazy languages, this operation is called "force".
+#[doc = include_str!("../api-docs/en_filterset_materialize.md")]
 pub fn en_filterset_materialize(
     log: &impl LogProvider, lua: &Lua,
 ) -> impl Fn(Table) -> mlua::Result<Table> {
@@ -852,13 +752,7 @@ impl JoinCtx {
     }
 }
 
-/// en_join lets you switch from N threads to one thread.
-/// all threads which reach the en_join point will be shut down, except for the last one.
-/// the last one gets all the ids from other threads.
-///
-/// This is useful for map-reduce type computations where the first part of the operation can be
-/// parallelized, but we need serial execution on the last part;
-/// for example if you want to sort the returned spans.
+#[doc = include_str!("../api-docs/en_join.md")]
 pub fn en_join(joinable: Arc<JoinCtx>) -> impl Fn(Table) -> LogProviderResult<Vec<u32>> {
     move |results: Table| {
         joinable.is_joining.store(true, atomic::Ordering::Release);

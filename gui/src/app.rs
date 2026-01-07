@@ -1,6 +1,6 @@
 use std::{
     cell::{LazyCell, RefCell},
-    cmp::max,
+    cmp::{Reverse, max},
     env,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, atomic::Ordering},
@@ -9,12 +9,16 @@ use std::{
 use anyhow::Context;
 use clap::Parser;
 use egui::{
-    Color32, Margin, Pos2, Rect, RichText, Stroke, Theme, Ui,
+    Color32, Margin, Pos2, Rect, RichText, Stroke, TextEdit, Theme, Ui,
     epaint::text::{FontInsert, InsertFontFamily},
 };
 use entrace_core::{
     IETLoadConfig, IETPresentationConfig, LoadConfig,
     remote::{FileWatchConfig, NotifyExt},
+};
+use nucleo_matcher::{
+    Matcher, Utf32Str,
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
 };
 use rfd::FileDialog;
 use tracing::info;
@@ -34,7 +38,7 @@ use crate::{
     search::{self, LocatingState, SearchState, query_window::query_windows},
     self_tracing::SelfTracingState,
     settings::{self, SettingsDialogState, SettingsState, apply_settings},
-    time_print,
+    time_print, time_trace,
     tree::TreeView,
 };
 pub struct App {
@@ -51,6 +55,7 @@ pub struct App {
     pub ephemeral_settings: EphemeralSettings,
     pub benchmarks: BenchmarkManager,
     pub about_state: AboutState,
+    pub api_docs_state: ApiDocsState,
 }
 impl Default for App {
     fn default() -> Self {
@@ -68,6 +73,7 @@ impl Default for App {
             ephemeral_settings: EphemeralSettings::default(),
             benchmarks: BenchmarkManager::default(),
             about_state: AboutState::new(),
+            api_docs_state: ApiDocsState::default(),
         }
     }
 }
@@ -262,6 +268,9 @@ impl App {
                 };
                 ui.menu_button("About", |ui| {
                     ui.label(format!("ENTRACE GUI {}", env!("CARGO_PKG_VERSION")));
+                    if ui.button("Lua API Docs").clicked() {
+                        self.api_docs_state.open = true;
+                    }
                     if ui.button("Third-party licenses").clicked() {
                         self.about_state.open = true;
                     }
@@ -291,6 +300,7 @@ impl App {
                     search::bottom_panel_ui(
                         ui,
                         &mut self.search_state,
+                        &mut self.api_docs_state,
                         log_state,
                         text_field_margin,
                     );
@@ -303,6 +313,7 @@ impl App {
             convert_dialog::convert_dialog(ui, self);
             query_windows(ui, ctx, self);
             about_dialog(ctx, self);
+            api_docs_dialog(ctx, &mut self.api_docs_state);
             let available_rect = ui.available_rect_before_wrap();
             let notification_area = Rect::from_min_max(
                 Pos2::new(available_rect.right() - 200.0, available_rect.top()),
@@ -370,4 +381,110 @@ fn about_dialog(ctx: &egui::Context, app: &mut App) {
             ui.label((*app.about_state.text).clone());
         },
     );
+}
+pub struct ApiDocsState {
+    pub open: bool,
+    pub selected_idx: usize,
+    pub search_buf: String,
+    pub matcher: Option<nucleo_matcher::Matcher>,
+    /// index of function in LUA_API_DOCS, name, score
+    pub matches: Vec<((usize, &'static str), u32)>,
+}
+impl Default for ApiDocsState {
+    fn default() -> Self {
+        Self {
+            open: Default::default(),
+            selected_idx: Default::default(),
+            search_buf: Default::default(),
+            matcher: Default::default(),
+            matches: ApiDocsState::empty_matches().collect(),
+        }
+    }
+}
+impl ApiDocsState {
+    fn empty_matches() -> impl Iterator<Item = ((usize, &'static str), u32)> {
+        entrace_query::lua_api_docs::LUA_FN_NAMES.iter().enumerate().map(|(x, y)| ((x, *y), 0))
+    }
+    fn search_matches(&mut self) {
+        if self.matcher.is_none() {
+            self.matcher = Some(Matcher::new(nucleo_matcher::Config::DEFAULT));
+        }
+        let matcher = self.matcher.as_mut().unwrap();
+        let pattern = Pattern::new(
+            &self.search_buf,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
+        // inlined and changed version of Pattern::match_list
+        if pattern.atoms.is_empty() {
+            self.matches.clear();
+            self.matches.extend(Self::empty_matches())
+        }
+        let mut buf = Vec::new();
+        self.matches.clear();
+        self.matches.extend(
+            entrace_query::lua_api_docs::LUA_FN_NAMES.iter().enumerate().filter_map(
+                |(orig_idx, item)| {
+                    pattern
+                        .score(Utf32Str::new(item, &mut buf), matcher)
+                        .map(|score| ((orig_idx, *item), score))
+                },
+            ),
+        );
+        self.matches.sort_by_key(|(_, score)| Reverse(*score));
+    }
+}
+fn api_docs_dialog(ctx: &egui::Context, state: &mut ApiDocsState) {
+    let mut open = state.open;
+    egui::Window::new("Lua API")
+        .open(&mut open)
+        .default_width(700.0)
+        .default_height(300.0)
+        .min_height(250.0)
+        .min_width(500.0)
+        .show(ctx, |ui| {
+            let api_docs: &[entrace_query::lua_api_docs::Function] =
+                &entrace_query::lua_api_docs::LUA_API_DOCS;
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    let editor = TextEdit::singleline(&mut state.search_buf).desired_width(150.0);
+                    let editor = ui.add(editor);
+                    if editor.changed() {
+                        time_trace("searching", || state.search_matches());
+                    }
+                    egui::ScrollArea::vertical().auto_shrink([true, false]).show(ui, |ui| {
+                        for ((fn_idx, name), _score) in &state.matches {
+                            let btn = egui::Button::new(*name)
+                                .frame_when_inactive(false)
+                                .selected(*fn_idx == state.selected_idx);
+                            let res = ui.add(btn);
+                            if res.clicked() {
+                                state.selected_idx = *fn_idx;
+                            }
+                        }
+                    });
+                });
+                ui.vertical(|ui| {
+                    ui.group(|ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            let docs = api_docs[state.selected_idx].docs;
+                            if docs.is_empty() {
+                                ui.label("No documentation available for this function.");
+                            } else {
+                                ui.label(docs);
+                            }
+                        });
+                        //let height_now = ui.min_rect().height();
+                        //let min_wanted_height = 250.0;
+                        //if height_now < min_wanted_height {
+                        //    let allocated = min_wanted_height - height_now;
+                        //    ui.allocate_space(vec2(allocated, 0.0));
+                        //    //info!(height_now, min_wanted_height, allocated);
+                        //}
+                    })
+                });
+            });
+        });
+    state.open = open;
 }
