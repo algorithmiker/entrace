@@ -22,3 +22,7 @@ pub enum QueryError {
     )]
     FailedToCoerce(#[source] mlua::Error),
 }
+
+pub mod lua_api_docs {
+    include!(concat!(env!("OUT_DIR"), "/lua_api_docs.rs"));
+}

@@ -2,7 +2,7 @@ Filterset API
 ---
 
 This is a brief design doc on the Filterset evaluator (not to be confused with the lua interface of filtersets, the en_filterset_* functions).
-If you are looking for docs on how to use filtersets in ENTRACE, that's in the Lua API docs.
+If you are looking for docs on how to use filtersets in ENTRACE, that's in the [Lua API docs](../entrace_query/api-docs).
 
 ```rust
 type FiltersetId = usize;
