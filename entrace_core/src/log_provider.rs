@@ -18,6 +18,9 @@ pub enum LogProviderError {
     FileIETError(#[from] FileIETError),
     #[error(transparent)]
     RemoteLogProviderError(#[from] RemoteLogProviderError),
+    /// This is not actually an error, we just use it to signal that the lua vm should quit
+    #[error("This thread was shutdown during a join")]
+    JoinShutdown,
 }
 pub type LogProviderResult<T> = Result<T, LogProviderError>;
 #[allow(clippy::len_without_is_empty)]

@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     num::NonZero,
-    ops::RangeInclusive,
+    ops::{Deref, RangeInclusive},
     rc::Rc,
     sync::{Arc, RwLock},
     time::{Duration, Instant},
@@ -19,14 +19,17 @@ use egui::{
     Color32, CornerRadius, Margin, Pos2, Rect, Response, Sense, Separator, TextEdit, Ui,
     epaint::RectShape, pos2, vec2,
 };
-use entrace_query::{QueryError, lua_api::setup_lua_on_arc_rwlock};
+use entrace_core::LogProviderError;
+use entrace_query::{
+    QueryError,
+    lua_api::{JoinCtx, setup_lua_on_arc_rwlock},
+};
 use mlua::{FromLua, Lua, Value};
 use tracing::{error, info};
 #[derive(Debug, Clone)]
 pub struct PartialQueryResult {
     pub ids: Vec<u32>,
 }
-
 #[derive(Debug)]
 pub struct QueryResult {
     pub ids: Vec<u32>,
@@ -106,14 +109,15 @@ impl SearchState {
         std::thread::spawn(move || {
             // Controller thread
             let spans_len = { trace_provider.read().unwrap().len() } as u32;
-            let items_per_thread = spans_len / threads;
+            let mut items_per_thread = spans_len / threads;
             info!(
                 "spans_len: {spans_len}, threads: {threads} -> items per thread: \
                  {items_per_thread}"
             );
-            // if we have less items to query than threads
             if items_per_thread == 0 {
                 threads = 1;
+                items_per_thread = spans_len;
+                info!("Less items to query than threads, setting threads=1");
             }
             let mut ranges: Vec<RangeInclusive<u32>> = (0u32..threads)
                 .map(|x| (x * items_per_thread)..=(x + 1) * items_per_thread - 1)
@@ -122,6 +126,10 @@ impl SearchState {
                 *last = *last.start()..=spans_len.saturating_sub(1); // exclusive range
             }
             info!("Ranges for jobs: {ranges:?}");
+
+            let join_ctx = JoinCtx::from_thread_count(threads as usize);
+            let join_ctx_arc = Arc::new(join_ctx);
+
             let rv = std::iter::repeat_with(|| None).take(threads as usize).collect();
             #[allow(clippy::type_complexity)]
             let results: Arc<
@@ -133,12 +141,17 @@ impl SearchState {
                     let trace_provider = tp.clone();
                     let range = ranges[i as usize].clone();
                     let results2 = results.clone();
+                    let join_ctx_local = join_ctx_arc.clone();
                     f.spawn(move || {
                         let finder_cache = Rc::new(RefCell::new(HashMap::new()));
                         let mut lua = Lua::new();
-                        if let Err(y) =
-                            setup_lua_on_arc_rwlock(&mut lua, range, trace_provider, finder_cache)
-                        {
+                        if let Err(y) = setup_lua_on_arc_rwlock(
+                            &mut lua,
+                            range,
+                            trace_provider,
+                            finder_cache,
+                            join_ctx_local,
+                        ) {
                             let mut rw = results2.write().unwrap();
                             rw[i as usize] = Some(Err(QueryError::LuaError(y)));
                         }
@@ -157,7 +170,16 @@ impl SearchState {
                             }
                             Err(y) => {
                                 let mut rw = results2.write().unwrap();
-                                rw[i as usize] = Some(Err(QueryError::LuaError(y)));
+                                if let mlua::Error::CallbackError { ref cause, .. } = y
+                                    && let mlua::Error::ExternalError(ext) = cause.deref()
+                                    && let Some(LogProviderError::JoinShutdown) = ext.downcast_ref()
+                                {
+                                    // this is not a true error; therefore ignored.
+                                    // see JoinShutdown docs.
+                                    rw[i as usize] = Some(Ok(PartialQueryResult { ids: vec![] }));
+                                } else {
+                                    rw[i as usize] = Some(Err(QueryError::LuaError(y)));
+                                }
                             }
                         }
                     });

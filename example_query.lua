@@ -103,3 +103,15 @@ function query10()
 	materialized = en_filterset_materialize(final)
 	return materialized
 end
+
+function query11()
+	local rstart, rend = en_span_range()
+
+	local ids = {}
+	for i = rstart, rend do
+		table.insert(ids, i)
+	end
+	joined = en_join(ids)
+	table.sort(joined)
+	return joined
+end
