@@ -15,61 +15,64 @@
       crane,
     }:
     let
-      systems = nixpkgs.lib.systems.flakeExposed;
-      forAllSystems = f: builtins.foldl' nixpkgs.lib.recursiveUpdate { } (builtins.map f systems);
+      forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in
-    forAllSystems (
-      system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        rustfmt-nightly = fenix.packages.${system}.default.rustfmt;
-        craneLib = crane.mkLib pkgs;
-        rpath-libs = [
-          pkgs.libGL
-          pkgs.libxkbcommon
-          pkgs.wayland
-          pkgs.luajit
-        ];
-        craneCommonArgs = {
-          pname = "entrace";
-          version = "0.1.1";
-          src = pkgs.lib.fileset.toSource {
-            root = ./.;
-            fileset = pkgs.lib.fileset.unions [
-              (craneLib.fileset.commonCargoSources ./.)
-              (pkgs.lib.fileset.fileFilter (file: file.hasExt "md") ./.)
-              (pkgs.lib.fileset.maybeMissing ./gui/vendor)
-              (pkgs.lib.fileset.maybeMissing ./docs)
+    {
+      devShells = forAllSystems (system: {
+        default = import ./shell.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          rustfmt-nightly = fenix.packages.${system}.default.rustfmt;
+        };
+      });
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          craneLib = crane.mkLib pkgs;
+          rpath-libs = [
+            pkgs.libGL
+            pkgs.libxkbcommon
+            pkgs.wayland
+            pkgs.luajit
+          ];
+          craneCommonArgs = {
+            version = "0.1.2";
+            pname = "entrace-deps";
+            src = pkgs.lib.fileset.toSource {
+              root = ./.;
+              fileset = pkgs.lib.fileset.unions [
+                (craneLib.fileset.commonCargoSources ./.)
+                (pkgs.lib.fileset.fileFilter (file: file.hasExt "md") ./.)
+                (pkgs.lib.fileset.maybeMissing ./gui/vendor)
+                (pkgs.lib.fileset.maybeMissing ./docs)
+              ];
+            };
+            cargoCheckExtraArgs = "";
+            buildInputs = [ ] ++ rpath-libs;
+            nativeBuildInputs = [
+              pkgs.mold-wrapped
+              pkgs.patchelf
+              pkgs.pkg-config
             ];
           };
-          buildInputs = [ ] ++ rpath-libs;
-          nativeBuildInputs = [
-            pkgs.breakpointHook
-            pkgs.mold-wrapped
-            pkgs.patchelf
-            pkgs.pkg-config
-          ];
-        };
-        cargoArtifacts = craneLib.buildDepsOnly craneCommonArgs;
-        craneWithCommonArgs =
-          x: craneLib.buildPackage (craneCommonArgs // { inherit cargoArtifacts; } // x);
-        entraceApp = craneWithCommonArgs {
-          pname = "entrace";
-          cargoExtraArgs = "-p entrace_gui";
-          postFixup = ''
-            ENTRACE_BIN="$out/bin/entrace"
-            patchelf --add-rpath ${pkgs.lib.makeLibraryPath rpath-libs} "$ENTRACE_BIN"
-            patchelf \
-              --add-needed libwayland-client.so \
-              --add-needed libxkbcommon.so \
-              --add-needed libEGL.so \
-              --add-needed libluajit-5.1.so "$ENTRACE_BIN"
-          '';
-        };
-      in
-      {
-        devShells.${system}.default = import ./shell.nix { inherit pkgs rustfmt-nightly; };
-        packages.${system} = {
+          cargoArtifacts = craneLib.buildDepsOnly craneCommonArgs;
+          craneWithCommonArgs =
+            x: craneLib.buildPackage (craneCommonArgs // { inherit cargoArtifacts; } // x);
+          entraceApp = craneWithCommonArgs {
+            pname = "entrace";
+            cargoExtraArgs = "-p entrace_gui";
+            postFixup = ''
+              ENTRACE_BIN="$out/bin/entrace"
+              patchelf --add-rpath ${pkgs.lib.makeLibraryPath rpath-libs} "$ENTRACE_BIN"
+              patchelf \
+                --add-needed libwayland-client.so \
+                --add-needed libxkbcommon.so \
+                --add-needed libEGL.so \
+                --add-needed libluajit-5.1.so "$ENTRACE_BIN"
+            '';
+          };
+        in
+        {
           default = entraceApp;
           entrace = entraceApp;
           entrace_core = craneWithCommonArgs {
@@ -84,7 +87,7 @@
             pname = "entrace-script";
             cargoExtraArgs = "-p entrace_script";
           };
-        };
-      }
-    );
+        }
+      );
+    };
 }
