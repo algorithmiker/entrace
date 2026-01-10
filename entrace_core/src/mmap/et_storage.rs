@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    collections::BTreeMap,
     io::{BufReader, BufWriter, Read, Seek, Write},
     sync::RwLock,
     thread::JoinHandle,
@@ -15,7 +16,7 @@ use crate::{
 };
 
 pub enum Message<Q: FileLike + Send> {
-    Entry(MixedTraceEntry),
+    Entry { id: u32, entry: MixedTraceEntry },
     Shutdown(Q),
 }
 #[derive(thiserror::Error, Debug)]
@@ -65,18 +66,32 @@ impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q>
                 bincode::serde::encode_into_std_write(TraceEntry::root(), &mut writer, config)
                     .unwrap();
             cur_offset += len as u64;
+
+            // If multiple threads are writing subspans to the same parent, there can be a race
+            // condition where a child arrives before the parent. This is reproducable on Windows
+            // only, see issue #4.
+            // To prevent this, we store disjoint leaves in a buffer until their parent arrives.
+            // next_id keeps track of what id comes next in sequential order. if the buffer has next_id, we are good and the entry can be written.
+            // Else we wait for it to appear.
+            let mut buffer = BTreeMap::new();
+            let mut next_id = 1;
+
             while let Ok(msg) = rx.recv() {
                 match msg {
-                    Message::Entry(entry) => {
-                        offsets.push(cur_offset);
-                        let len = child_lists.len() as u32;
-                        child_lists[entry.parent as usize].children.push(len);
-                        child_lists.push(PoolEntry::new());
-                        let cfg = config;
-                        let written =
-                            bincode::serde::encode_into_std_write(&entry, &mut writer, cfg)
-                                .unwrap();
-                        cur_offset += written as u64;
+                    Message::Entry { id, entry } => {
+                        buffer.insert(id, entry);
+                        while let Some(entry) = buffer.remove(&next_id) {
+                            offsets.push(cur_offset);
+                            let len = child_lists.len() as u32;
+                            child_lists[entry.parent as usize].children.push(len);
+                            child_lists.push(PoolEntry::new());
+                            let cfg = config;
+                            let written =
+                                bincode::serde::encode_into_std_write(&entry, &mut writer, cfg)
+                                    .unwrap();
+                            cur_offset += written as u64;
+                            next_id += 1;
+                        }
                     }
                     Message::Shutdown(mut tmp_buf) => {
                         let mut tmp_buf_writer = BufWriter::new(&mut tmp_buf);
@@ -118,13 +133,15 @@ impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q>
     }
 }
 impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> Storage for ETStorage<T, Q> {
-    fn new_span(&self, parent: u32, attrs: crate::Attrs, meta: &'static tracing::Metadata<'_>) {
+    fn new_span(
+        &self, id: u32, parent: u32, attrs: crate::Attrs, meta: &'static tracing::Metadata<'_>,
+    ) {
         let message = attrs.iter().find(|x| x.0 == "message").map(|x| match &x.1 {
             EnValue::String(y) => y.clone(),
             q => format!("{q:?}"),
         });
         let entry = MixedTraceEntry { parent, metadata: meta.into(), attributes: attrs, message };
 
-        self.sender.send(Message::Entry(entry)).ok();
+        self.sender.send(Message::Entry { id, entry }).ok();
     }
 }
