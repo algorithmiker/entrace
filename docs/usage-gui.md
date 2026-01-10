@@ -51,7 +51,8 @@ The methods to work with the query data are likewise prefixed by `en_`.
 ### Example queries
 There are some example queries in [`example_query.lua`](../example_query.lua) in the repo root. 
 ### Available API
-The full API documentation for ENTRACE can be found in the [search module docs](../gui/src/search/lua_api.rs).
+The full API documentation for ENTRACE can be found in the [LUa API Docs](../entrace_query/api-docs/).
+Displaying the docs is also available in the GUI.
 Every function whose name starts with `en_` here implements a lua method for queries.
 
 ### Disabling parallelism
