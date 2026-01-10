@@ -1,31 +1,19 @@
- en_filterset_dnf()
- input:
-   filters: a list of list of filter descriptions, which is interpreted as a DNF clause list.
-   (this example would be (a=1 AND c=0) OR (b=1)
-   {
-     {
-       { target = "a", relation = "EQ", value = "1", src = 0 },
-       { target = "c", relation = "EQ", value = "0", src = 0 },
-     }
-     {
-       { target = "b", relation = "EQ", value = "1", src = 0},
-     }
-   }
-   source: a filterset
- outputs: a filterset that matches an item if satisfies either of the AND clauses
- { type: "filterset",
-   root: 1,
-   items: {
-     { type = "prim_list", value = {1,2,3}},
-     { type = "rel_dnf", src = 0,
-       clauses = {
-         {
-           { target = "a", relation = "EQ", value = "1", src = 0 },
-           { target = "c", relation = "EQ", value = "0", src = 0 },
-         }
-         {
-           { target = "b", relation = "EQ", value = "1", src = 0},
-         }
-       }
-     }
- }
+Apply a filter in Disjunctive Normal Form (OR of ANDs) to a filterset.
+
+## INPUT
+- A clause list, where each clause is a list of filter descriptions accepted by en_filter.
+Such a filter description is a table that looks like:
+  - target: name of variable, eg. "message" or "meta.filename"
+  - relation: a string, one of "EQ" | "LT" | "GT"
+  - value: a constant to compare with.
+- A source filterset.
+
+## OUTPUT
+A new filterset matching spans which satisfy the DNF.
+
+## EXAMPLE
+local fs = en_filterset_from_range(0, 100)
+local level_5_or_message_error = en_filterset_dnf({
+  { {target="meta.level", relation="EQ", value=5} },
+  { {target="message", relation="EQ", value="error"} }
+}, fs)
