@@ -1,7 +1,29 @@
- en_join lets you switch from N threads to one thread.
- all threads which reach the en_join point will be shut down, except for the last one.
- the last one gets all the ids from other threads.
+Switch from N threads to one thread.
 
- This is useful for map-reduce type computations where the first part of the operation can be
- parallelized, but we need serial execution on the last part;
- for example if you want to sort the returned spans.
+All query threads that reach the en_join point are shut down, except for the last one. 
+This last thread receives a concatenated list of IDs submitted by all threads.
+
+This is useful for map-reduce type computations where the first part of the operation can be
+parallelized, but we need serial execution on the last part;
+for example if you want to sort the returned spans.
+
+## INPUT
+A list (sequence table) of span IDs.
+
+## OUTPUT
+A combined list of span IDs if this is the last thread to finish, otherwise the thread shuts down.
+
+## EXAMPLE
+local rstart, rend = en_span_range()
+local ids = {}
+for i=rstart,rend do
+    table.insert(ids,i)
+end
+local total_ids = en_join(ids)
+
+-- Sort the combined results by name
+table.sort(total_ids, function(a, b)
+  return en_metadata_name(a) < en_metadata_name(b)
+end)
+
+return total_ids

@@ -36,7 +36,7 @@ fn main() {
         };
         let doc = doc.trim().to_string();
         if let Err(msg) = validate_docs(&doc) {
-            println!("cargo::warning=Validation failed for {}: {msg}", file_path.display());
+            println!("cargo::error=Validation failed for {}: {msg}", file_path.display());
         };
         fns.push(Function { name: name.clone(), docs: doc });
     }
@@ -89,25 +89,31 @@ pub fn api_fn_names(items: &[Item]) -> impl Iterator<Item = String> {
 //   blah
 // ## EXAMPLE
 // local bar = en_function_name(1, "foo")
-pub fn validate_docs(inp: &str) -> Result<(), &'static str> {
-    let lines: Vec<&str> = inp.lines().collect();
-    let _ = lines
-        .iter()
-        .enumerate()
-        .find(|(_i, x)| x.starts_with("## INPUT"))
-        .ok_or("there should be a subheading ## INPUT")?;
-    let _ = lines
-        .iter()
-        .enumerate()
-        .find(|(_i, x)| x.starts_with("## OUTPUT"))
-        .ok_or("there should be a subheading ## OUTPUT")?;
-    let _ = lines
-        .iter()
-        .enumerate()
-        .find(|(_i, x)| x.starts_with("## EXAMPLE"))
-        .ok_or("there should be a subheading ## EXAMPLE")?;
-
-    Ok(())
+pub fn validate_docs(inp: &str) -> Result<(), String> {
+    let (mut input_fnd, mut output_fnd, mut example_fnd) = (false, false, false);
+    for line in inp.lines() {
+        if line.starts_with("## INPUT") {
+            input_fnd = true;
+        }
+        if line.starts_with("## OUTPUT") {
+            output_fnd = true;
+        }
+        if line.starts_with("## EXAMPLE") {
+            example_fnd = true;
+        }
+    }
+    if input_fnd && output_fnd && example_fnd {
+        return Ok(());
+    }
+    let mut err = String::from("Expected to find subheading(s): ");
+    for (found, s) in [(input_fnd, "INPUT"), (output_fnd, "OUTPUT"), (example_fnd, "EXAMPLE")] {
+        if !found {
+            err.push_str(s);
+            err.push(',');
+        }
+    }
+    err.pop();
+    Err(err)
 }
 
 //fn find_subheading(lines: &[&str]) -> Option<usize>{
