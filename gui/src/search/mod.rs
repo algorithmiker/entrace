@@ -1,4 +1,5 @@
 pub mod query_window;
+pub mod segmented_button;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -11,12 +12,16 @@ use std::{
 };
 
 use crate::{
-    ApiDocsState, LogState, TraceProvider, icon_colored, notifications::draw_x, rect,
-    search::query_window::PaginatedResults, spawn_task,
+    ApiDocsState, LogState, TraceProvider, icon_colored,
+    notifications::draw_x,
+    rect,
+    search::{query_window::PaginatedResults, segmented_button::SegmentedIconButtons},
+    spawn_task,
 };
 use crossbeam::channel::Receiver;
 use egui::{
-    Color32, CornerRadius, Margin, Pos2, Rect, Response, Sense, Separator, TextEdit, Ui, pos2, vec2,
+    Color32, CornerRadius, Margin, Pos2, Rect, Response, Sense, Separator, TextEdit, Ui,
+    epaint::RectShape, pos2, vec2,
 };
 use entrace_core::LogProviderError;
 use entrace_query::{
@@ -287,6 +292,7 @@ pub fn bottom_panel_ui(
     let total_top_padding = resize_width + text_field_margin.topf();
     let search_rect = search_response.rect;
     let search_rect = search_rect.with_min_y(search_rect.min.y - total_top_padding);
+
     let icon_size = 20.0;
     let rect_top_left = pos2(avail.max.x - (3.0 * icon_size), search_rect.min.y);
     let rect_bottom_right = pos2(avail.max.x, search_rect.min.y + icon_size);
@@ -296,42 +302,14 @@ pub fn bottom_panel_ui(
         egui::Theme::Dark => Color32::DARK_GRAY,
         egui::Theme::Light => Color32::LIGHT_GRAY,
     };
-    ui.painter().rect_filled(rect2, bg_corner_radius, color);
 
-    // make sure the items we add do not overflow the bottom panel, since that will
-    // grow it. to do this, we define an inner rect.
-    let spacing = 3.0;
-    let inner_rect_min = rect2.min + vec2(3.0, 3.0);
-    let inner_rect_max = rect2.max + vec2(-1.0, -3.0);
-    let total_width = inner_rect_max.x - inner_rect_min.x;
-    // [<left><spacing>|<spacing><mid><spacing>|<spacing><right>]
-    let segment_width = (total_width - (2.0 * spacing)) / 3.0;
-    let segment_size = vec2(segment_width, inner_rect_max.y - inner_rect_min.y);
-    let inner_left = Rect::from_min_size(inner_rect_min, segment_size);
-    let inner_mid =
-        Rect::from_min_size(pos2(inner_left.max.x + spacing, inner_rect_min.y), segment_size);
-    let inner_right = rect![pos2(inner_mid.max.x + spacing, inner_rect_min.y), inner_rect_max];
-    let bg_left = rect![rect2.min, pos2(inner_left.max.x, rect2.max.y)];
-    let bg_mid = rect![pos2(inner_mid.min.x, rect2.min.y), pos2(inner_mid.max.x, rect2.max.y)];
-    let bg_right = rect![pos2(inner_right.min.x, rect2.min.y), rect2.max];
-
-    let (topy, bottomy) = (rect2.min.y + 3.0, rect2.max.y - 1.0);
-    let sep1_rect =
-        rect![pos2(inner_left.max.x + spacing, topy), pos2(inner_mid.min.x - spacing, bottomy)];
-    let sep2_rect =
-        rect![pos2(inner_mid.max.x + spacing, topy), pos2(inner_right.min.x - spacing, bottomy)];
-    ui.put(sep1_rect, Separator::default().vertical());
-    ui.put(sep2_rect, Separator::default().vertical());
-
-    fn paint_label(
+    fn paint_label<L, O>(
         ui: &mut Ui, bg_rect: Rect, bg_corner_radius: CornerRadius, inner_rect: Rect,
-        label_callback: impl FnOnce(&mut Ui, Color32), on_click: impl FnOnce(Response),
-        hover_text: Option<&str>,
+        label_callback: impl FnOnce(&mut Ui, Color32) -> L, on_click: impl FnOnce(Response) -> O,
+        hover_text: &str,
     ) {
         let mut resp = ui.allocate_rect(inner_rect, Sense::click());
-        if let Some(x) = hover_text {
-            resp = resp.on_hover_text(x);
-        }
+        resp = resp.on_hover_text(hover_text);
         if resp.hovered() {
             ui.painter().rect_filled(bg_rect, bg_corner_radius, Color32::GRAY.gamma_multiply(0.5));
         }
@@ -342,46 +320,46 @@ pub fn bottom_panel_ui(
             on_click(resp);
         }
     }
-    paint_label(
-        ui,
-        bg_left,
-        bg_corner_radius,
-        inner_left,
-        |ui, color| {
-            ui.put(inner_left, icon_colored!("../../vendor/icons/play_arrow.svg", color));
-        },
-        |_| search_state.new_query(log_state.trace_provider.clone()),
-        Some("Run (Ctrl+Enter)"),
-    );
-    paint_label(
-        ui,
-        bg_mid,
-        bg_corner_radius,
-        inner_mid,
-        |ui, color| {
-            ui.put(inner_mid, icon_colored!("../../vendor/icons/docs.svg", color));
-        },
-        |_| {
-            api_docs_state.open = true;
-        },
-        Some("Lua API Docs"),
-    );
-
-    paint_label(
-        ui,
-        bg_right,
-        CornerRadius::ZERO,
-        inner_right,
-        |ui, color| {
-            ui.put(inner_right, icon_colored!("../../vendor/icons/settings.svg", color));
-        },
-        |_| {
-            info!(settings_btn_rect = ?inner_right, "Query settings icon clicked");
-            search_state.settings.data =
-                QuerySettingsDialogData::Open { settings_button_rect: inner_right, position: None }
-        },
-        Some("Settings"),
-    );
+    let inner_to_bg_rect =
+        |inner: Rect| rect![pos2(inner.min.x, rect2.min.y), pos2(inner.max.x, rect2.max.y)];
+    SegmentedIconButtons::new(RectShape::filled(rect2, bg_corner_radius, color))
+        .separator_y_padding([3.0, 1.0])
+        .with_contents(|ui, rects: [Rect; 3]| {
+            paint_label(
+                ui,
+                inner_to_bg_rect(rects[0]).with_min_x(rect2.min.x),
+                bg_corner_radius,
+                rects[0],
+                |ui, clr| ui.put(rects[0], icon_colored!("../../vendor/icons/play_arrow.svg", clr)),
+                |_| search_state.new_query(log_state.trace_provider.clone()),
+                "Run (Ctrl+Enter)",
+            );
+            paint_label(
+                ui,
+                inner_to_bg_rect(rects[1]),
+                CornerRadius::ZERO,
+                rects[1],
+                |ui, clr| ui.put(rects[1], icon_colored!("../../vendor/icons/docs.svg", clr)),
+                |_| api_docs_state.open = true,
+                "Lua API Docs",
+            );
+            paint_label(
+                ui,
+                inner_to_bg_rect(rect![rects[2].min, rect2.max]),
+                CornerRadius::ZERO,
+                rects[2],
+                |ui, clr| ui.put(rects[2], icon_colored!("../../vendor/icons/settings.svg", clr)),
+                |_| {
+                    info!(settings_btn_rect = ?rects[2], "Query settings icon clicked");
+                    search_state.settings.data = QuerySettingsDialogData::Open {
+                        settings_button_rect: rects[2],
+                        position: None,
+                    }
+                },
+                "Settings",
+            );
+        })
+        .show(ui);
 }
 pub struct LocatingStarted {
     pub target: u32,
