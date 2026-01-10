@@ -25,9 +25,9 @@ impl Close for Vec<JoinHandle<()>> {
 
 /// Used in the entrace backend to store data received by a [crate::tree_layer::TreeLayer]
 pub trait Storage {
-    fn new_span(&self, parent: u32, attrs: Attrs, meta: &'static Metadata<'_>);
+    fn new_span(&self, id: u32, parent: u32, attrs: Attrs, meta: &'static Metadata<'_>);
     /// Implemented by default as a call to [Storage::new_span].
-    fn new_event(&self, parent: u32, attrs: Attrs, meta: &'static Metadata<'_>) {
-        self.new_span(parent, attrs, meta);
+    fn new_event(&self, id: u32, parent: u32, attrs: Attrs, meta: &'static Metadata<'_>) {
+        self.new_span(id, parent, attrs, meta);
     }
 }

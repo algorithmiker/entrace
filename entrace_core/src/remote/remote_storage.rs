@@ -1,9 +1,9 @@
 use crate::{StorageFormat, TraceEntry, entrace_magic_for, storage::Storage, tree_layer::EnValue};
 use crossbeam_channel::{SendError, Sender};
-use std::{any::Any, io::Write, sync::RwLock, thread::JoinHandle};
+use std::{any::Any, collections::BTreeMap, io::Write, sync::RwLock, thread::JoinHandle};
 
 pub enum RemoteMessage {
-    NewSpan(TraceEntry),
+    NewSpan { id: u32, entry: TraceEntry },
     Shutdown,
 }
 pub struct IETStorageConfig<T: Write + Send> {
@@ -65,10 +65,22 @@ impl<T: Write + Send + 'static> IETStorage<T> {
             }
 
             write_message(&mut buffer, TraceEntry::root(), &mut config);
+            // If multiple threads are writing subspans to the same parent, there can be a race
+            // condition where a child arrives before the parent. This is reproducable on Windows
+            // only, see issue #4.
+            // To prevent this, we store disjoint leaves in a buffer until their parent arrives.
+            // next_id keeps track of what id comes next in sequential order. if the buffer has next_id, we are good and the entry can be written.
+            // Else we wait for it to appear.
+            let mut reorder_buffer = BTreeMap::new();
+            let mut next_id = 1u32;
             while let Ok(msg) = rx.recv() {
                 match msg {
-                    RemoteMessage::NewSpan(m) => {
-                        write_message(&mut buffer, m, &mut config);
+                    RemoteMessage::NewSpan { id, entry } => {
+                        reorder_buffer.insert(id, entry);
+                        while let Some(entry) = reorder_buffer.remove(&next_id) {
+                            write_message(&mut buffer, entry, &mut config);
+                            next_id += 1;
+                        }
                     }
                     RemoteMessage::Shutdown => break,
                 }
@@ -88,18 +100,18 @@ impl<T: Write + Send + 'static> IETStorage<T> {
     }
 }
 impl<T: Write + Send + 'static> Storage for IETStorage<T> {
-    fn new_span(&self, parent: u32, attrs: crate::Attrs, meta: &'static tracing::Metadata<'_>) {
+    fn new_span(
+        &self, id: u32, parent: u32, attrs: crate::Attrs, meta: &'static tracing::Metadata<'_>,
+    ) {
         let message = attrs.iter().find(|x| x.0 == "message").map(|x| match &x.1 {
             EnValue::String(y) => y.clone(),
             q => format!("{q:?}"),
         });
         self.sender
-            .send(RemoteMessage::NewSpan(TraceEntry {
-                parent,
-                message,
-                metadata: meta.into(),
-                attributes: attrs,
-            }))
+            .send(RemoteMessage::NewSpan {
+                id,
+                entry: TraceEntry { parent, message, metadata: meta.into(), attributes: attrs },
+            })
             .ok();
     }
 }
