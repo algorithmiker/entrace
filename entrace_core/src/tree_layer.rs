@@ -56,7 +56,7 @@ impl<S: Subscriber, S2: Storage + 'static> Layer<S> for TreeLayer<S2> {
         let pool_id: u32 = self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1; // the atomic returns the previous value, so add one here too
         self.id_to_pool.write().unwrap().insert(id.clone(), pool_id);
         let sent_attrs = visitor.attrs.into_iter().map(|x| (x.0.to_string(), x.1)).collect();
-        self.storage.new_span(parent, sent_attrs, attrs.metadata());
+        self.storage.new_span(pool_id, parent, sent_attrs, attrs.metadata());
     }
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         let parent: u32;
@@ -75,8 +75,9 @@ impl<S: Subscriber, S2: Storage + 'static> Layer<S> for TreeLayer<S2> {
 
         let mut visitor = EventVisitor::new();
         event.record(&mut visitor);
-        self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let pool_id = self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         self.storage.new_event(
+            pool_id,
             parent,
             visitor.attrs.into_iter().map(|x| (x.0.to_string(), x.1)).collect(),
             event.metadata(),
