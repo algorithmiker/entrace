@@ -391,6 +391,15 @@ pub fn span_matches_filter(
 //
 //   Valid item types are: "prim_list", "prim_range", "rel_dnf",
 //   "intersect", "union", "invert"
+
+// en_filterset_from_list()
+//  input: list of ids
+//  outputs: a table with
+//    type: "filterset"
+//    root: 0
+//    items: {
+//      { type = "prim_list"; value = the list}
+//    }
 #[doc = include_str!("../api-docs/en_filterset_from_list.md")]
 pub fn en_filterset_from_list(lua: &Lua, t: Table) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
@@ -407,6 +416,14 @@ pub fn en_filterset_from_list(lua: &Lua, t: Table) -> mlua::Result<Table> {
     Ok(fs)
 }
 
+// en_filterset_from_range()
+//  input: start, end
+//  outputs: a table with
+//    type: "filterset"
+//    root: 0
+//    items: {
+//      { type = "prim_range"; start = start, end=end}
+//    }
 #[doc = include_str!("../api-docs/en_filterset_from_range.md")]
 pub fn en_filterset_from_range(lua: &Lua, (start, end): (usize, usize)) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
@@ -424,6 +441,14 @@ pub fn en_filterset_from_range(lua: &Lua, (start, end): (usize, usize)) -> mlua:
     Ok(fs)
 }
 
+// en_filter()
+// input:
+//   filter: table with
+//     target: name of variable eg. "message" or "meta.filename"
+//     relation: a relation, one of "EQ", "LT", "GT"
+//     value: a constant to compare with
+//   src: filterset
+// outputs: { type = "filterset", root = 1, items = { src = 0, {type = "rel_dnf", src = 0, clauses = {{ target, relation, value}} }}},
 #[doc = include_str!("../api-docs/en_filter.md")]
 pub fn en_filter(lua: &Lua, (filter, src): (Table, Table)) -> mlua::Result<Table> {
     let old_items: Table = src.get("items")?;
@@ -488,6 +513,38 @@ fn concat_items_lists(lua: &Lua, filters: Table) -> mlua::Result<(Table, Vec<i64
 
     Ok((all_items, srcs))
 }
+
+//  en_filterset_union()
+//  input:
+//    filters: a list of filtersets, e. g
+//    {
+//      { type: "filterset",
+//        root: 1,
+//        items: {
+//          { type = "prim_list", value = {1,2,3}},
+//          { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+//        }
+//      }
+//      { type: "filterset",
+//        root: 1,
+//        items: {
+//          {type: "prim_list", value = {1,2,3} },
+//          {type: "rel", target = "b", relation = "EQ", value = "1", src = 0},
+//        }
+//      }
+//    }
+//  outputs: a filterset that matches an item if it is in any input filterset.
+//  This does NOT deduplicate any items, eg. for the given inputs, the result would be as follows.
+//  Note that en_materialize() MAY deduplicate, but there is no guarantee it will.
+//  { type: "filterset",
+//    root: 4,
+//    items: {
+//      { type = "prim_list", value = {1,2,3}},
+//      { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+//      { type: "prim_list", value = {1,2,3}},
+//      { type: "rel", target = "b", relation = "EQ", value = "1", src = 2 },
+//      { type: "union", srcs = { 1, 3 }}
+//  }
 #[doc = include_str!("../api-docs/en_filterset_union.md")]
 pub fn en_filterset_union(lua: &Lua, filters: Table) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
@@ -502,6 +559,38 @@ pub fn en_filterset_union(lua: &Lua, filters: Table) -> mlua::Result<Table> {
     Ok(fs)
 }
 
+// en_filterset_intersect()
+// input:
+//   filters: a list of filtersets, e. g
+//   {
+//     { type: "filterset",
+//       root: 1,
+//       items: {
+//         { type = "prim_list", value = {1,2,3}},
+//         { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+//       }
+//     }
+//     { type: "filterset",
+//       root: 1,
+//       items: {
+//         {type: "prim_list", value = {1,2,3} },
+//         {type: "rel", target = "b", relation = "EQ", value = "1", src = 0},
+//       }
+//     }
+//   }
+// outputs: a filterset that matches an item if it is in all input filtersets.
+// This does NOT deduplicate any items, eg. for the given inputs, the result would be as follows.
+// Note that en_materialize() MAY deduplicate, but there is no guarantee it will. (it currently
+// doesn't, because an acyclic graph is required for evauator correctness, this might change).
+// { type: "filterset",
+//   root: 4,
+//   items: {
+//     { type = "prim_list", value = {1,2,3}},
+//     { type = "rel", target = "a", relation = "EQ", value = "1", src = 0 },
+//     { type: "prim_list", value = {1,2,3}},
+//     { type: "rel", target = "b", relation = "EQ", value = "1", src = 2 },
+//     { type: "intersect", srcs = { 1, 3 }}
+// }
 #[doc = include_str!("../api-docs/en_filterset_intersect.md")]
 pub fn en_filterset_intersect(lua: &Lua, filters: Table) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
@@ -517,6 +606,37 @@ pub fn en_filterset_intersect(lua: &Lua, filters: Table) -> mlua::Result<Table> 
     Ok(fs)
 }
 
+//  en_filterset_dnf()
+//  input:
+//    filters: a list of list of filter descriptions, which is interpreted as a DNF clause list.
+//    (this example would be (a=1 AND c=0) OR (b=1)
+//    {
+//      {
+//        { target = "a", relation = "EQ", value = "1", src = 0 },
+//        { target = "c", relation = "EQ", value = "0", src = 0 },
+//      }
+//      {
+//        { target = "b", relation = "EQ", value = "1", src = 0},
+//      }
+//    }
+//    source: a filterset
+//  outputs: a filterset that matches an item if satisfies either of the AND clauses
+//  { type: "filterset",
+//    root: 1,
+//    items: {
+//      { type = "prim_list", value = {1,2,3}},
+//      { type = "rel_dnf", src = 0,
+//        clauses = {
+//          {
+//            { target = "a", relation = "EQ", value = "1", src = 0 },
+//            { target = "c", relation = "EQ", value = "0", src = 0 },
+//          }
+//          {
+//            { target = "b", relation = "EQ", value = "1", src = 0},
+//          }
+//        }
+//      }
+//  }
 #[doc = include_str!("../api-docs/en_filterset_dnf.md")]
 pub fn en_filterset_dnf(lua: &Lua, (clauses, src): (Table, Table)) -> mlua::Result<Table> {
     let new_fs = deepcopy_table(lua, src)?;
@@ -532,6 +652,9 @@ pub fn en_filterset_dnf(lua: &Lua, (clauses, src): (Table, Table)) -> mlua::Resu
     Ok(new_fs)
 }
 
+// en_filterset_not()
+// input: filterset
+// outputs: a filterset that matches an item exactly if it is not in the filterset.
 #[doc = include_str!("../api-docs/en_filterset_not.md")]
 pub fn en_filterset_not(lua: &Lua, filterset: Table) -> mlua::Result<Table> {
     let new_fs = deepcopy_table(lua, filterset)?;
