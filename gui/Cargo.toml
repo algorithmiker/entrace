@@ -21,7 +21,7 @@ memchr = "2.7.5"
 mimalloc = "0.1.47"
 mlua = { version = "0.11.0", features = ["error-send", "luajit"] }
 notify = "8.0.0"
-rfd = "0.15.4"
+rfd = "0.17.2"
 thiserror = "2.0.12"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }

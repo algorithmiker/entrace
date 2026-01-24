@@ -34,6 +34,7 @@
             pkgs.libxkbcommon
             pkgs.wayland
             pkgs.luajit
+            pkgs.dbus.lib
           ];
           craneCommonArgs = {
             version = "0.1.2";
@@ -68,7 +69,8 @@
                 --add-needed libwayland-client.so \
                 --add-needed libxkbcommon.so \
                 --add-needed libEGL.so \
-                --add-needed libluajit-5.1.so "$ENTRACE_BIN"
+                --add-needed libluajit-5.1.so \
+                --add-needed libdbus-1.so "$ENTRACE_BIN"
             '';
           };
         in

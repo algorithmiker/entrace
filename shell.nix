@@ -4,9 +4,9 @@ let
     fetchFromGitHub {
       owner = "nixos";
       repo = "nixpkgs";
-      rev = "c6245e83d836d0433170a16eb185cefe0572f8b8";
+      rev = "523257564973361cc3e55e3df3e77e68c20b0b80";
       #branch = "nixos-unstable";
-      hash = "sha256-G/WVghka6c4bAzMhTwT2vjLccg/awmHkdKSd2JrycLc=";
+      hash = "sha256-saOixpqPT4fiE/M8EfHv9I98f3sSEvt6nhMJ/z0a7xI=";
     };
   pathPkgs = import <nixpkgs> { };
 in
@@ -19,6 +19,7 @@ let
     pkgs.wayland
     pkgs.libxkbcommon
     pkgs.libGL
+    pkgs.dbus.lib
   ];
 in
 pkgs.mkShell {
