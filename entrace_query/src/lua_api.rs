@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::{
     cell::RefCell,
     cmp::Ordering,
@@ -261,7 +262,8 @@ pub fn en_as_string(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult
 #[doc = include_str!("../api-docs/en_contains_anywhere.md")]
 pub fn en_contains_anywhere(
     tcc: &impl LogProvider, finder_cache: Rc<RefCell<HashMap<String, Finder>>>,
-) -> impl Fn((u32, String)) -> LogProviderResult<bool> {
+    buffer: Rc<RefCell<ReusableString>>,
+) -> impl FnMut((u32, String)) -> LogProviderResult<bool> {
     move |(id, needle): (u32, String)| {
         let entry = en_as_string(tcc)(id)?;
 
@@ -272,12 +274,43 @@ pub fn en_contains_anywhere(
             finder_w.insert(needle.clone(), memchr::memmem::Finder::new(&needle).into_owned());
             finder_w.get(&needle).unwrap()
         };
-        let s = format!("{entry:?}");
-        let contains = finder.find(s.as_bytes());
+        let mut buf = buffer.borrow_mut();
+        buf.clear();
+        write!(&mut buf.buf, "{entry:?}").unwrap();
+        //let s = format!("{entry:?}");
+        let contains = finder.find(buf.buf.as_bytes());
         Ok(contains.is_some())
     }
 }
 
+#[doc = include_str!("../api-docs/en_foreach.md")]
+pub fn en_foreach(
+    _lua: &Lua, range: &RangeInclusive<u32>, f: mlua::Function,
+) -> mlua::Result<Vec<u32>> {
+    let mut results: Vec<u32> = Vec::new();
+    for i in range.clone() {
+        let res = f.call::<mlua::Value>(i)?;
+        match res {
+            Value::Nil => (),
+            Value::Boolean(x) => {
+                if x {
+                    results.push(i)
+                }
+            }
+            Value::Integer(x) => {
+                if let Ok(y) = x.try_into() {
+                    results.push(y);
+                }
+            }
+            Value::Table(table) => results.extend(table.sequence_values::<u32>().filter_map(|x|x.ok())),
+            x => return Err(anyhow::anyhow!(
+                "Callback in en_foreach returned value of bad type: {x:?}. Only nil, boolean, u32 or array is allowed."
+            ).into_lua_err()),
+        }
+    }
+
+    Ok(results)
+}
 fn meta_matches(
     meta: &MetadataRefContainer, target: &str, comparator: Ordering, value: &EnValue,
 ) -> anyhow::Result<bool> {
@@ -904,8 +937,13 @@ pub fn en_join(joinable: Arc<JoinCtx>) -> impl Fn(Table) -> LogProviderResult<Ve
 macro_rules! lua_setup_with_wrappers {
     ($lua: expr, $trace: expr, $finder_cache: expr, $join_ctx: expr, $range: expr, $lua_wrap: ident, $lua_wrap2: ident) => {
         let globals = $lua.globals();
-        let en_range = $lua.create_function(move |_state, _: ()| en_span_range(&$range));
+        let (range2, range3) = ($range.clone(), $range.clone());
+        let en_range = $lua.create_function(move |_state, _: ()| en_span_range(&range2));
         globals.set("en_span_range", en_range?)?;
+        globals.set(
+            "en_foreach",
+            $lua.create_function(move |lua: &Lua, f: mlua::Function| en_foreach(lua, &range3, f))?,
+        )?;
         globals.set("en_log", $lua.create_function(move |_, x| en_log(x))?)?;
         globals.set("en_pretty_table", $lua.create_function(move |_, t| en_pretty_table(t))?)?;
         let t = $trace.clone();
@@ -977,9 +1015,49 @@ macro_rules! lua_setup_with_wrappers {
         )?;
     };
 }
+pub struct ReusableString {
+    pub buf: String,
+}
+impl ReusableString {
+    pub fn clear(&mut self) {
+        let old_len = self.buf.len();
+        self.buf.clear();
+        if self.buf.capacity() > 10 * 1024 * 1024 {
+            self.buf.shrink_to(old_len);
+        }
+    }
+    pub fn new() -> Self {
+        Self { buf: String::new() }
+    }
+}
+
+impl Default for ReusableString {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+pub struct LuaEvalState {
+    pub join_ctx: Arc<JoinCtx>,
+    pub range: RangeInclusive<u32>,
+    pub finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>,
+    /// used to make throwaway allocations like en_contains_anywhere faster
+    pub reusable_buf: Rc<RefCell<ReusableString>>,
+}
+impl LuaEvalState {
+    pub fn new(
+        join_ctx: Arc<JoinCtx>, range: RangeInclusive<u32>,
+        finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>,
+    ) -> LuaEvalState {
+        LuaEvalState {
+            join_ctx,
+            range,
+            finder_cache,
+            reusable_buf: Rc::new(RefCell::new(ReusableString::new())),
+        }
+    }
+}
 pub fn setup_lua_on_arc_rwlock(
-    lua: &mut Lua, range: RangeInclusive<u32>, trace: Arc<RwLock<TraceProvider>>,
-    finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>, join_ctx: Arc<JoinCtx>,
+    lua: &mut Lua, trace: Arc<RwLock<TraceProvider>>, state: LuaEvalState,
 ) -> Result<(), mlua::Error> {
     /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
     /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
@@ -1006,13 +1084,15 @@ pub fn setup_lua_on_arc_rwlock(
             }
         }};
     }
+    let LuaEvalState { join_ctx, range, finder_cache, reusable_buf } = state;
     let t = trace.clone();
     lua.globals().set(
         "en_contains_anywhere",
         lua.create_function(move |_lua: &Lua, (id, needle): (u32, String)| {
             let log = t.read().unwrap();
             let adapter = DynAdapter(&**log);
-            en_contains_anywhere(&adapter, finder_cache.clone())((id, needle)).map_err(to_lua_err)
+            en_contains_anywhere(&adapter, finder_cache.clone(), reusable_buf.clone())((id, needle))
+                .map_err(to_lua_err)
         })?,
     )?;
 
@@ -1021,8 +1101,7 @@ pub fn setup_lua_on_arc_rwlock(
 }
 
 pub fn setup_lua_no_lock(
-    lua: &mut Lua, range: RangeInclusive<u32>, trace: Arc<TraceProvider>,
-    finder_cache: Rc<RefCell<HashMap<String, Finder<'static>>>>, join_ctx: Arc<JoinCtx>,
+    lua: &mut Lua, trace: Arc<TraceProvider>, state: LuaEvalState,
 ) -> Result<(), mlua::Error> {
     /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
     /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
@@ -1047,12 +1126,14 @@ pub fn setup_lua_no_lock(
             }
         }};
     }
+    let LuaEvalState { join_ctx, range, finder_cache, reusable_buf } = state;
     let t = trace.clone();
     lua.globals().set(
         "en_contains_anywhere",
         lua.create_function(move |_lua: &Lua, (id, needle): (u32, String)| {
             let adapter = DynAdapter(&**t);
-            en_contains_anywhere(&adapter, finder_cache.clone())((id, needle)).map_err(to_lua_err)
+            en_contains_anywhere(&adapter, finder_cache.clone(), reusable_buf.clone())((id, needle))
+                .map_err(to_lua_err)
         })?,
     )?;
     lua_setup_with_wrappers!(lua, trace, finder_cache, join_ctx, range, lua_wrap, lua_wrap2);

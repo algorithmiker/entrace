@@ -20,13 +20,13 @@ use crate::{
 };
 use crossbeam::channel::Receiver;
 use egui::{
-    Color32, CornerRadius, Margin, Pos2, Rect, Response, Sense, Separator, TextEdit, Ui,
-    epaint::RectShape, pos2, vec2,
+    Color32, CornerRadius, Margin, Pos2, Rect, Response, Sense, TextEdit, Ui, epaint::RectShape,
+    pos2, vec2,
 };
 use entrace_core::LogProviderError;
 use entrace_query::{
     QueryError,
-    lua_api::{JoinCtx, setup_lua_on_arc_rwlock},
+    lua_api::{JoinCtx, LuaEvalState, setup_lua_on_arc_rwlock},
 };
 use mlua::{FromLua, Lua, Value};
 use tracing::{error, info};
@@ -41,8 +41,14 @@ pub struct QueryResult {
 }
 #[derive(Debug)]
 pub enum Query {
-    Loading { id: u16, rx: crossbeam::channel::Receiver<Result<QueryResult, QueryError>> },
-    Completed { id: u16, result: Result<QueryResult, QueryError> },
+    Loading {
+        id: u16,
+        rx: crossbeam::channel::Receiver<(Result<QueryResult, QueryError>, Duration)>,
+    },
+    Completed {
+        id: u16,
+        result: Result<QueryResult, QueryError>,
+    },
 }
 impl Query {
     pub fn id(&self) -> u16 {
@@ -91,6 +97,7 @@ impl QuerySettings {
         }
     }
 }
+
 pub struct SearchState {
     pub settings: QuerySettings,
     pub text: String,
@@ -111,12 +118,12 @@ impl SearchState {
         let tp = trace_provider.clone();
         let mut threads = self.settings.num_threads as u32;
         std::thread::spawn(move || {
+            let query_start = Instant::now();
             // Controller thread
             let spans_len = { trace_provider.read().unwrap().len() } as u32;
             let mut items_per_thread = spans_len / threads;
             info!(
-                "spans_len: {spans_len}, threads: {threads} -> items per thread: \
-                 {items_per_thread}"
+                "spans_len: {spans_len}, threads: {threads} -> items per thread: {items_per_thread}"
             );
             if items_per_thread == 0 {
                 threads = 1;
@@ -149,13 +156,9 @@ impl SearchState {
                     f.spawn(move || {
                         let finder_cache = Rc::new(RefCell::new(HashMap::new()));
                         let mut lua = Lua::new();
-                        if let Err(y) = setup_lua_on_arc_rwlock(
-                            &mut lua,
-                            range,
-                            trace_provider,
-                            finder_cache,
-                            join_ctx_local,
-                        ) {
+                        let lua_state = LuaEvalState::new(join_ctx_local, range, finder_cache);
+                        if let Err(y) = setup_lua_on_arc_rwlock(&mut lua, trace_provider, lua_state)
+                        {
                             let mut rw = results2.write().unwrap();
                             rw[i as usize] = Some(Err(QueryError::LuaError(y)));
                         }
@@ -189,10 +192,11 @@ impl SearchState {
                     });
                 }
             });
+            let elapsed = query_start.elapsed();
 
             // reconcile partial results
             let Ok(rr) = results.read() else {
-                tx.send(Err(QueryError::QueryDied)).ok();
+                tx.send((Err(QueryError::QueryDied), elapsed)).ok();
                 return;
             };
             let mut total_ids = vec![];
@@ -202,7 +206,7 @@ impl SearchState {
                         total_ids.extend(&y.ids);
                     }
                     Some(Err(x)) => {
-                        tx.send(Err(x.clone())).ok();
+                        tx.send((Err(x.clone()), elapsed)).ok();
                         return;
                     }
                     _ => unreachable!(),
@@ -210,7 +214,7 @@ impl SearchState {
             }
             let ids_len = total_ids.len();
             let qr = QueryResult { ids: total_ids, pages: PaginatedResults::new(ids_len) };
-            tx.send(Ok(qr)).ok();
+            tx.send((Ok(qr), elapsed)).ok();
         });
     }
     pub fn new() -> Self {

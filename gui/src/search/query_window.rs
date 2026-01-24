@@ -25,9 +25,9 @@ pub fn query_windows(ui: &mut Ui, ctx: &Context, app: &mut App) {
             match app.search_state.queries[i] {
                 Query::Loading { ref id, ref rx } => {
                     match rx.try_recv() {
-                        Ok(q) => {
-                            app.search_state.queries[i] = Query::Completed { id: *id, result: q };
-                            set_elapsed(i, &mut app.search_state.query_timing);
+                        Ok((res, elapsed)) => {
+                            app.search_state.queries[i] = Query::Completed { id: *id, result: res };
+                            app.search_state.query_timing[i] = QueryTiming::Finished(elapsed)
                         }
                         Err(x) => match x {
                             crossbeam::channel::TryRecvError::Empty => (),
