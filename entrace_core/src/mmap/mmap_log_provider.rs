@@ -48,21 +48,26 @@ impl MmapLogProvider {
 const BINCODE_STD: bincode::config::Configuration = bincode::config::standard();
 impl LogProvider for MmapLogProvider {
     fn children(&self, x: u32) -> LogProviderResult<&[u32]> {
+        let idx = x as usize;
         self.child_lists
-            .get(x as usize)
+            .get(idx)
             .map(|x| x.children.as_slice())
-            .ok_or(LogProviderError::OutOfBounds)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx, len: self.len() })
     }
 
-    fn attrs(&'_ self, x: u32) -> LogProviderResult<Vec<(&'_ str, EnValueRef<'_>)>> {
-        let offset = self.offset_of(x).ok_or(LogProviderError::OutOfBounds)?;
+    fn attrs(&'_ self, idx: u32) -> LogProviderResult<Vec<(&'_ str, EnValueRef<'_>)>> {
+        let offset = self
+            .offset_of(idx)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx: idx as usize, len: self.len() })?;
         let decoded: (TraceEntryRef, usize) =
             bincode::serde::borrow_decode_from_slice(&self.map[offset..], BINCODE_STD)?;
         Ok(decoded.0.attributes)
     }
 
-    fn header(&'_ self, x: u32) -> LogProviderResult<Header<'_>> {
-        let offset = self.offset_of(x).ok_or(LogProviderError::OutOfBounds)?;
+    fn header(&'_ self, idx: u32) -> LogProviderResult<Header<'_>> {
+        let offset = self
+            .offset_of(idx)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx: idx as usize, len: self.len() })?;
         // only deserialize what we need
         #[derive(Serialize, Deserialize)]
         struct HeaderPart<'a> {
@@ -78,7 +83,10 @@ impl LogProvider for MmapLogProvider {
             pub file: Option<&'a str>,
             pub line: Option<u32>,
         }
-        let from_offset = self.map.get(offset..).ok_or(LogProviderError::OutOfBounds)?;
+        let from_offset = self
+            .map
+            .get(offset..)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx: idx as usize, len: self.len() })?;
         let decoded: (HeaderPart, usize) =
             bincode::serde::borrow_decode_from_slice(from_offset, BINCODE_STD)?;
         Ok(Header {
@@ -91,7 +99,9 @@ impl LogProvider for MmapLogProvider {
     }
 
     fn meta(&self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
-        let offset = self.offset_of(x).ok_or(LogProviderError::OutOfBounds)?;
+        let offset = self
+            .offset_of(x)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx: x as usize, len: self.len() })?;
         let decoded: (TraceEntryRef, _) =
             bincode::serde::borrow_decode_from_slice(&self.map[offset..], BINCODE_STD)?;
 
@@ -102,7 +112,9 @@ impl LogProvider for MmapLogProvider {
     }
 
     fn parent(&self, x: u32) -> LogProviderResult<u32> {
-        let offset = self.offset_of(x).ok_or(LogProviderError::OutOfBounds)?;
+        let offset = self
+            .offset_of(x)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx: x as usize, len: self.len() })?;
         // there is a MemmapEntryRef at this offset. but since its first field is the parent,
         // decode just that.
         let decoded: (u32, _) =

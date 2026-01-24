@@ -265,8 +265,6 @@ pub fn en_contains_anywhere(
     buffer: Rc<RefCell<ReusableString>>,
 ) -> impl FnMut((u32, String)) -> LogProviderResult<bool> {
     move |(id, needle): (u32, String)| {
-        let entry = en_as_string(tcc)(id)?;
-
         let mut finder_w = finder_cache.borrow_mut();
         let finder = if let Some(q) = finder_w.get(&needle) {
             q
@@ -276,6 +274,17 @@ pub fn en_contains_anywhere(
         };
         let mut buf = buffer.borrow_mut();
         buf.clear();
+        let attrs = tcc.attrs(id)?;
+        let meta = tcc.meta(id)?;
+        let children = tcc.children(id)?;
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct Entry<'a> {
+            meta: &'a MetadataRefContainer<'a>,
+            attrs: &'a Vec<(&'a str, EnValueRef<'a>)>,
+            children: &'a [u32],
+        }
+        let entry = Entry { meta: &meta, attrs: &attrs, children };
         write!(&mut buf.buf, "{entry:?}").unwrap();
         //let s = format!("{entry:?}");
         let contains = finder.find(buf.buf.as_bytes());

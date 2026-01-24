@@ -72,25 +72,32 @@ impl LogProvider for BaseIETLogProvider {
         self.pool
             .get(x as usize)
             .map(|x| x.children.as_slice())
-            .ok_or(LogProviderError::OutOfBounds)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx: x as usize, len: self.len() })
     }
 
-    fn parent(&self, x: u32) -> LogProviderResult<u32> {
-        self.data.get(x as usize).map(|x| x.parent).ok_or(LogProviderError::OutOfBounds)
+    fn parent(&self, idx: u32) -> LogProviderResult<u32> {
+        self.data
+            .get(idx as usize)
+            .map(|x| x.parent)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx: idx as usize, len: self.len() })
     }
 
-    fn attrs(&'_ self, x: u32) -> LogProviderResult<Vec<(&'_ str, EnValueRef<'_>)>> {
+    fn attrs(&'_ self, idx: u32) -> LogProviderResult<Vec<(&'_ str, EnValueRef<'_>)>> {
+        let idx = idx as usize;
         // HACK: maybe this should return an iterator instead
-        // TODO: figure out if that will affect search
         // not high priority since attrs are only displayed on demand
         self.data
-            .get(x as usize)
+            .get(idx)
             .map(|x| x.attributes.iter().map(|(x, y)| (x.as_str(), y.as_ref())).collect())
-            .ok_or(LogProviderError::OutOfBounds)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx, len: self.len() })
     }
 
-    fn header(&'_ self, x: u32) -> LogProviderResult<Header<'_>> {
-        let y = self.data.get(x as usize).ok_or(LogProviderError::OutOfBounds)?;
+    fn header(&'_ self, idx: u32) -> LogProviderResult<Header<'_>> {
+        let idx = idx as usize;
+        let y = self
+            .data
+            .get(idx)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx, len: self.len() })?;
         let h = Header {
             name: &y.metadata.name,
             level: y.metadata.level,
@@ -101,8 +108,12 @@ impl LogProvider for BaseIETLogProvider {
         Ok(h)
     }
 
-    fn meta(&'_ self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
-        self.data.get(x as usize).map(|x| x.metadata.as_ref()).ok_or(LogProviderError::OutOfBounds)
+    fn meta(&'_ self, idx: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
+        let idx = idx as usize;
+        self.data
+            .get(idx)
+            .map(|x| x.metadata.as_ref())
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx, len: self.len() })
     }
 
     fn frame_callback(&mut self) {
