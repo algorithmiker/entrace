@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
 use clap::Parser;
+use entrace_core::{IETLoadConfig, IETPresentationConfig, remote::FileWatchConfig};
 use entrace_query::lua_api::{JoinCtx, LuaEvalState};
 
 #[derive(Parser)]
@@ -14,8 +15,17 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let Args { lua_file, trace_file } = Args::parse();
-    let trace =
-        unsafe { entrace_core::load_trace(trace_file, entrace_core::LoadConfig::default()) }?;
+    let trace = unsafe {
+        entrace_core::load_trace(
+            trace_file,
+            entrace_core::LoadConfig {
+                iht: IETLoadConfig {
+                    watch: FileWatchConfig::DontWatch,
+                    presentation: IETPresentationConfig::default(),
+                },
+            },
+        )
+    }?;
     let trace_arc = Arc::new(trace);
     let mut lua = mlua::Lua::new();
     let finder_cache = Rc::new(RefCell::new(HashMap::new()));

@@ -113,11 +113,10 @@ impl FileIETLogProvider {
         let initial = load_iet_trace(&mut reader, length_prefixed)?;
         info!(duration = ?start.elapsed(), "RemoteLogProvider: loaded initial iet file");
 
-        let worker_thread = move |mut file2, tx: Sender<_>, config2: IETPresentationConfig<R>| {
-            tx.send(MainThreadMessage::ReplaceData(initial.data)).unwrap();
-            tx.send(MainThreadMessage::ReplacePool(initial.pool)).unwrap();
-
-            match load_config.watch {
+        let worker_thread =
+            move |mut file2, tx: Sender<_>, config2: IETPresentationConfig<R>| match load_config
+                .watch
+            {
                 FileWatchConfig::DontWatch => (),
                 FileWatchConfig::Watch(file_path) => {
                     #[cfg(feature = "notify-watch")]
@@ -144,9 +143,10 @@ impl FileIETLogProvider {
                         return;
                     }
                 }
-            }
-        };
-        let base = BaseIETLogProvider::new(file, load_config.presentation, worker_thread);
+            };
+        let mut base = BaseIETLogProvider::new(file, load_config.presentation, worker_thread);
+        base.pool = initial.pool;
+        base.data = initial.data;
         Ok(Self(base))
     }
 }
