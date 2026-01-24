@@ -1,5 +1,7 @@
+mod bottom_panel;
 pub mod query_window;
 pub mod segmented_button;
+pub use bottom_panel::*;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -11,18 +13,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{
-    ApiDocsState, LogState, TraceProvider, icon_colored,
-    notifications::draw_x,
-    rect,
-    search::{query_window::PaginatedResults, segmented_button::SegmentedIconButtons},
-    spawn_task,
-};
+use crate::{TraceProvider, search::query_window::PaginatedResults, spawn_task};
 use crossbeam::channel::Receiver;
-use egui::{
-    Color32, CornerRadius, Margin, Pos2, Rect, Response, Sense, TextEdit, Ui, epaint::RectShape,
-    pos2, vec2,
-};
+use egui::{Pos2, Rect};
+
 use entrace_core::LogProviderError;
 use entrace_query::{
     QueryError,
@@ -100,7 +94,7 @@ impl QuerySettings {
 
 pub struct SearchState {
     pub settings: QuerySettings,
-    pub text: String,
+    pub text: SearchTextState,
     pub queries: Vec<Query>,
     pub last_id: u16,
     pub query_window_open: Vec<bool>,
@@ -114,7 +108,7 @@ impl SearchState {
         self.queries.push(Query::Loading { id: new_id, rx });
         self.query_window_open.push(true);
         self.query_timing.push(QueryTiming::Loading(Instant::now()));
-        let text_arc: Arc<str> = Arc::from(self.text.as_str());
+        let text_arc: Arc<str> = Arc::from(self.text.text.as_str());
         let tp = trace_provider.clone();
         let mut threads = self.settings.num_threads as u32;
         std::thread::spawn(move || {
@@ -219,7 +213,7 @@ impl SearchState {
     }
     pub fn new() -> Self {
         Self {
-            text: String::new(),
+            text: SearchTextState::default(),
             settings: QuerySettings::new(),
             queries: vec![],
             last_id: 0,
@@ -234,137 +228,6 @@ impl Default for SearchState {
     }
 }
 
-pub fn search_settings_dialog(ui: &mut Ui, search_state: &mut SearchState) {
-    if let QuerySettingsDialogData::Open { settings_button_rect, ref mut position } =
-        search_state.settings.data
-    {
-        let window = egui::Window::new("Query settings")
-            .collapsible(false)
-            .title_bar(false)
-            .resizable(false)
-            .pivot(egui::Align2::RIGHT_BOTTOM);
-        if position.is_none() {
-            *position = Some(settings_button_rect.right_top() - vec2(0.0, 10.0));
-        }
-        let pos = position.unwrap();
-        window.current_pos(pos).show(ui.ctx(), |ui| {
-            let (space_id, space_rect) = ui.allocate_space(vec2(18.0, 18.0));
-            let space_center = space_rect.center();
-            let interact = ui.interact(space_rect, space_id, Sense::click());
-            let interact_style = ui.style().interact(&interact);
-            draw_x(ui, space_center, 9.0, interact_style.text_color(), 1.0);
-            if interact.clicked() {
-                search_state.settings.data = QuerySettingsDialogData::Closed;
-            }
-            ui.horizontal(|ui| {
-                ui.label("Number of threads: ");
-                ui.add(
-                    egui::DragValue::new(&mut search_state.settings.num_threads)
-                        .speed(0.1)
-                        .range(1..=255),
-                );
-            });
-        });
-        if let Some(rect) = ui.memory(|x| x.area_rect("Query settings"))
-            && let QuerySettingsDialogData::Open { ref mut position, .. } =
-                search_state.settings.data
-        {
-            *position = Some(rect.max);
-        }
-    }
-}
-pub fn bottom_panel_ui(
-    ui: &mut Ui, search_state: &mut SearchState, api_docs_state: &mut ApiDocsState,
-    log_state: &LogState, text_field_margin: Margin,
-) {
-    let text_edit = TextEdit::multiline(&mut search_state.text)
-        .desired_width(f32::INFINITY)
-        .desired_rows(2)
-        .frame(false)
-        .margin(text_field_margin)
-        .hint_text("Query")
-        .code_editor();
-    let search_response = ui.add_sized(ui.available_size(), text_edit);
-    if search_response.has_focus()
-        && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl)
-    {
-        search_state.new_query(log_state.trace_provider.clone());
-    }
-
-    let avail = ui.ctx().available_rect();
-    let resize_width = ui.style().visuals.widgets.noninteractive.fg_stroke.width;
-    let total_top_padding = resize_width + text_field_margin.topf();
-    let search_rect = search_response.rect;
-    let search_rect = search_rect.with_min_y(search_rect.min.y - total_top_padding);
-
-    let icon_size = 20.0;
-    let rect_top_left = pos2(avail.max.x - (3.0 * icon_size), search_rect.min.y);
-    let rect_bottom_right = pos2(avail.max.x, search_rect.min.y + icon_size);
-    let rect2 = rect![rect_top_left, rect_bottom_right];
-    let bg_corner_radius = CornerRadius { nw: 0, ne: 0, sw: 2, se: 0 };
-    let color = match ui.ctx().theme() {
-        egui::Theme::Dark => Color32::DARK_GRAY,
-        egui::Theme::Light => Color32::LIGHT_GRAY,
-    };
-
-    fn paint_label<L, O>(
-        ui: &mut Ui, bg_rect: Rect, bg_corner_radius: CornerRadius, inner_rect: Rect,
-        label_callback: impl FnOnce(&mut Ui, Color32) -> L, on_click: impl FnOnce(Response) -> O,
-        hover_text: &str,
-    ) {
-        let mut resp = ui.allocate_rect(inner_rect, Sense::click());
-        resp = resp.on_hover_text(hover_text);
-        if resp.hovered() {
-            ui.painter().rect_filled(bg_rect, bg_corner_radius, Color32::GRAY.gamma_multiply(0.5));
-        }
-
-        let interact_style = ui.style().interact(&resp);
-        label_callback(ui, interact_style.text_color());
-        if resp.clicked() {
-            on_click(resp);
-        }
-    }
-    let inner_to_bg_rect =
-        |inner: Rect| rect![pos2(inner.min.x, rect2.min.y), pos2(inner.max.x, rect2.max.y)];
-    SegmentedIconButtons::new(RectShape::filled(rect2, bg_corner_radius, color))
-        .separator_y_padding([3.0, 1.0])
-        .with_contents(|ui, rects: [Rect; 3]| {
-            paint_label(
-                ui,
-                inner_to_bg_rect(rects[0]).with_min_x(rect2.min.x),
-                bg_corner_radius,
-                rects[0],
-                |ui, clr| ui.put(rects[0], icon_colored!("../../vendor/icons/play_arrow.svg", clr)),
-                |_| search_state.new_query(log_state.trace_provider.clone()),
-                "Run (Ctrl+Enter)",
-            );
-            paint_label(
-                ui,
-                inner_to_bg_rect(rects[1]),
-                CornerRadius::ZERO,
-                rects[1],
-                |ui, clr| ui.put(rects[1], icon_colored!("../../vendor/icons/docs.svg", clr)),
-                |_| api_docs_state.open = true,
-                "Lua API Docs",
-            );
-            paint_label(
-                ui,
-                inner_to_bg_rect(rect![rects[2].min, rect2.max]),
-                CornerRadius::ZERO,
-                rects[2],
-                |ui, clr| ui.put(rects[2], icon_colored!("../../vendor/icons/settings.svg", clr)),
-                |_| {
-                    info!(settings_btn_rect = ?rects[2], "Query settings icon clicked");
-                    search_state.settings.data = QuerySettingsDialogData::Open {
-                        settings_button_rect: rects[2],
-                        position: None,
-                    }
-                },
-                "Settings",
-            );
-        })
-        .show(ui);
-}
 pub struct LocatingStarted {
     pub target: u32,
     pub path_rx: Receiver<Vec<u32>>,
