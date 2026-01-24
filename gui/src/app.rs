@@ -405,6 +405,10 @@ impl ApiDocsState {
     fn empty_matches() -> impl Iterator<Item = ((usize, &'static str), u32)> {
         entrace_query::lua_api_docs::LUA_FN_NAMES.iter().enumerate().map(|(x, y)| ((x, *y), 0))
     }
+    pub fn clear_search(&mut self) {
+        self.search_buf.clear();
+        self.matches = Self::empty_matches().collect();
+    }
     fn search_matches(&mut self) {
         if self.matcher.is_none() {
             self.matcher = Some(Matcher::new(nucleo_matcher::Config::DEFAULT));
@@ -475,13 +479,6 @@ fn api_docs_dialog(ctx: &egui::Context, state: &mut ApiDocsState) {
                                 ui.label(docs);
                             }
                         });
-                        //let height_now = ui.min_rect().height();
-                        //let min_wanted_height = 250.0;
-                        //if height_now < min_wanted_height {
-                        //    let allocated = min_wanted_height - height_now;
-                        //    ui.allocate_space(vec2(allocated, 0.0));
-                        //    //info!(height_now, min_wanted_height, allocated);
-                        //}
                     })
                 });
             });

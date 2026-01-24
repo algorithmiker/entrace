@@ -1,5 +1,6 @@
 use egui::{
-    Color32, CornerRadius, Id, Key, Margin, Modifiers, Rect, Response, Sense, TextEdit, Ui,
+    Color32, CornerRadius, Id, Key, Margin, Modifiers, Rect, Response, RichText, Sense, TextEdit,
+    Ui,
     epaint::RectShape,
     pos2,
     text::{CCursor, CCursorRange},
@@ -21,7 +22,7 @@ use crate::{
 pub struct SearchTextState {
     pub text: String,
     pub matcher: Option<nucleo_matcher::Matcher>,
-    pub autocomplete_results: Vec<(&'static str, u32)>,
+    pub autocomplete_results: Vec<(usize, &'static str, u32)>,
 
     pub nucleo_buf: Vec<char>,
     pub force_focus: bool,
@@ -55,13 +56,15 @@ impl SearchTextState {
             Pattern::new(last_word, CaseMatching::Ignore, Normalization::Smart, AtomKind::Fuzzy);
         self.nucleo_buf.clear();
         self.autocomplete_results.clear();
-        let results = entrace_query::lua_api_docs::LUA_FN_NAMES.iter().filter_map(|item| {
-            pattern
-                .score(Utf32Str::new(item, &mut self.nucleo_buf), matcher)
-                .map(|score| (*item, score))
-        });
+        let results = entrace_query::lua_api_docs::LUA_FN_NAMES.iter().enumerate().filter_map(
+            |(idx, item)| {
+                pattern
+                    .score(Utf32Str::new(item, &mut self.nucleo_buf), matcher)
+                    .map(|score| (idx, *item, score))
+            },
+        );
         self.autocomplete_results.extend(results);
-        self.autocomplete_results.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+        self.autocomplete_results.sort_by_key(|(_, _, score)| std::cmp::Reverse(*score));
         self.autocomplete_results.truncate(5);
 
         if old_is_empty != self.autocomplete_results.is_empty() {
@@ -83,7 +86,7 @@ impl SearchTextState {
         let text_to_check = &self.text[..byte_cursor_pos];
         let last_word_len = get_current_word(text_to_check).len();
 
-        let result = self.autocomplete_results[selected].0;
+        let result = self.autocomplete_results[selected].1;
         let start = byte_cursor_pos - last_word_len;
         self.text.replace_range(start..byte_cursor_pos, result);
         let new_cursor_pos = self.text[..start + result.len()].chars().count();
@@ -105,7 +108,13 @@ pub fn bottom_panel_ui(
         if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab)) {
             search_state.text.cycle_or_start_selection();
         }
-
+        if let Some(idx) = search_state.text.selected_idx
+            && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Questionmark))
+        {
+            api_docs_state.clear_search();
+            api_docs_state.selected_idx = search_state.text.autocomplete_results[idx].0;
+            api_docs_state.open = true;
+        }
         if let Some(idx) = search_state.text.selected_idx
             && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter))
         {
@@ -145,16 +154,22 @@ pub fn bottom_panel_ui(
             .show(ui.ctx(), |ui| {
                 ui.set_max_width(search_response.rect.width());
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for (i, result) in search_state.text.autocomplete_results.iter().enumerate()
-                        {
-                            let mut btn = egui::Button::new(result.0)
-                                .sense(Sense::focusable_noninteractive());
-                            if search_state.text.selected_idx == Some(i) {
-                                btn = btn.fill(ui.visuals().selection.bg_fill);
+                    ui.vertical(|ui| {
+                        ui.add(egui::Label::new(
+                            RichText::new("Select: TAB, Accept: Enter, Docs: ?").small(),
+                        ));
+                        ui.horizontal(|ui| {
+                            for (i, result) in
+                                search_state.text.autocomplete_results.iter().enumerate()
+                            {
+                                let mut btn = egui::Button::new(result.1)
+                                    .sense(Sense::focusable_noninteractive());
+                                if search_state.text.selected_idx == Some(i) {
+                                    btn = btn.fill(ui.visuals().selection.bg_fill);
+                                }
+                                ui.add(btn);
                             }
-                            ui.add(btn);
-                        }
+                        });
                     });
                 });
             });
