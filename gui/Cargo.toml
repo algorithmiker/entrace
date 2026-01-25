@@ -15,7 +15,7 @@ directories = "6.0.0"
 eframe = "0.33.0"
 egui = "0.33.0"
 egui_extras = { version = "0.33.0", features = ["svg"] }
-entrace_core = { version = "0.1.1", path = "../entrace_core/" }
+entrace_core = { version = "0.2.0", path = "../entrace_core/" }
 entrace_query = { version = "0.1.1", path = "../entrace_query/" }
 memchr = "2.7.5"
 mimalloc = "0.1.47"

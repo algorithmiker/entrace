@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 mlua = { version = "0.11.0", features = ["error-send", "luajit"] }
-entrace_core = { version = "0.1.1", path = "../entrace_core/" }
+entrace_core = { version = "0.2.0", path = "../entrace_core/" }
 anyhow = "1.0.100"
 memchr = "2.7.6"
 thiserror = "2.0.17"

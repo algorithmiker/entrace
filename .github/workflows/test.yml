@@ -19,4 +19,6 @@ jobs:
     - run: nix build -L .#entrace_core
     - run: nix build -L .#entrace_core_lite
     - run: nix build -L .#entrace_script
+    - run: nix develop --command bash -c "cargo semver-checks -p entrace_core"
+      name: semver-checks
     - run: nix build -L .#entrace
