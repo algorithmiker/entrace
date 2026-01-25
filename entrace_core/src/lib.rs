@@ -260,9 +260,9 @@ impl<R: Refresh> IETPresentationConfig<R> {
 /// See also [FileIETLogProvider::new] and [remote::load_iht_trace] for functions that read an IET trace,
 /// in a safe way.
 pub unsafe fn load_trace<R: Refresh + Send + 'static>(
-    file_path: impl AsRef<Path> + Send + 'static, config: LoadConfig<R>,
-) -> Result<Box<dyn LogProvider + Send + 'static + Sync>, LoadTraceError> {
-    let mut file = File::open(&file_path)?;
+    file_path: &Path, config: LoadConfig<R>,
+) -> Result<LogProviderImpl, LoadTraceError> {
+    let mut file = File::open(file_path)?;
     let mut buf = [0; 10];
     file.read_exact(&mut buf).map_err(|x| LoadTraceError::BadMagic(MagicParseError::IoError(x)))?;
     let (version, ty) = parse_entrace_magic(&buf)?;
@@ -272,11 +272,11 @@ pub unsafe fn load_trace<R: Refresh + Send + 'static>(
     match ty {
         StorageFormat::IET => {
             let provider = FileIETLogProvider::new(file, config.iht, false)?;
-            Ok(Box::new(provider))
+            Ok(LogProviderImpl::FileIET(provider))
         }
         StorageFormat::IETPrefix => {
             let provider = FileIETLogProvider::new(file, config.iht, true)?;
-            Ok(Box::new(provider))
+            Ok(LogProviderImpl::FileIET(provider))
         }
         StorageFormat::ET => {
             #[cfg(feature = "mmap")]
@@ -285,7 +285,7 @@ pub unsafe fn load_trace<R: Refresh + Send + 'static>(
                 // SAFETY: Mmap is inherently unsafe.
                 let provider = unsafe { MmapLogProvider::from_file(&file) }
                     .map_err(LoadTraceError::MmapError)?;
-                return Ok(Box::new(provider));
+                return Ok(LogProviderImpl::Mmap(provider));
             }
             #[allow(unreachable_code)]
             Err(LoadTraceError::MmapNeeded)

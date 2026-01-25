@@ -13,7 +13,7 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 use entrace_core::{
-    IETLoadConfig, IETPresentationConfig, LoadConfig,
+    IETLoadConfig, IETPresentationConfig, LoadConfig, LogProvider,
     remote::{FileWatchConfig, NotifyExt},
 };
 use nucleo_matcher::{
@@ -155,7 +155,7 @@ impl App {
                 },
             };
             let trace = time_print("loading trace", || unsafe {
-                entrace_core::load_trace(path, load_config)
+                entrace_core::load_trace(path.as_ref(), load_config)
             });
             match trace {
                 Ok(x) => {

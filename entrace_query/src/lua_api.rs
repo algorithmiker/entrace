@@ -15,15 +15,15 @@ use std::{
 
 use anyhow::bail;
 use entrace_core::{
-    EnValue, EnValueRef, LevelContainer, LogProvider, LogProviderError, LogProviderResult,
-    MetadataRefContainer,
+    EnValue, EnValueRef, LevelContainer, LogProvider, LogProviderError, LogProviderImpl,
+    LogProviderResult, MetadataRefContainer,
 };
 use memchr::memmem::Finder;
 use mlua::{ExternalError, ExternalResult, IntoLua, Lua, Table, Value};
 use roaring::RoaringBitmap;
 
 use crate::{
-    QueryError, TraceProvider,
+    QueryError,
     filtersets::{Filterset, Matcher, Predicate, PredicateId},
     lua_value::{LuaValueRef, LuaValueRefRef},
 };
@@ -873,33 +873,6 @@ pub fn en_filterset_materialize(
     }
 }
 
-struct DynAdapter<'a>(&'a dyn LogProvider);
-impl<'a> LogProvider for DynAdapter<'a> {
-    fn children(&self, x: u32) -> Result<&[u32], LogProviderError> {
-        self.0.children(x)
-    }
-
-    fn parent(&self, x: u32) -> Result<u32, LogProviderError> {
-        self.0.parent(x)
-    }
-
-    fn attrs(&'_ self, x: u32) -> Result<Vec<(&'_ str, EnValueRef<'_>)>, LogProviderError> {
-        self.0.attrs(x)
-    }
-
-    fn header(&'_ self, x: u32) -> Result<entrace_core::Header<'_>, LogProviderError> {
-        self.0.header(x)
-    }
-
-    fn meta(&'_ self, x: u32) -> Result<MetadataRefContainer<'_>, LogProviderError> {
-        self.0.meta(x)
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
 pub struct JoinCtx {
     is_joining: AtomicBool,
     threads_joined: AtomicUsize,
@@ -942,7 +915,6 @@ pub fn en_join(joinable: Arc<JoinCtx>) -> impl Fn(Table) -> LogProviderResult<Ve
         Ok(old_results)
     }
 }
-
 macro_rules! lua_setup_with_wrappers {
     ($lua: expr, $trace: expr, $finder_cache: expr, $join_ctx: expr, $range: expr, $lua_wrap: ident, $lua_wrap2: ident) => {
         let globals = $lua.globals();
@@ -1066,7 +1038,7 @@ impl LuaEvalState {
     }
 }
 pub fn setup_lua_on_arc_rwlock(
-    lua: &mut Lua, trace: Arc<RwLock<TraceProvider>>, state: LuaEvalState,
+    lua: &mut Lua, trace: Arc<RwLock<LogProviderImpl>>, state: LuaEvalState,
 ) -> Result<(), mlua::Error> {
     /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
     /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
@@ -1075,8 +1047,7 @@ pub fn setup_lua_on_arc_rwlock(
             let tp = $trace_provider.clone();
             move |_lua: &Lua, a: $arg| {
                 let log = tp.read().unwrap();
-                let adapter = DynAdapter(&**log);
-                $fn(&adapter)(a).map_err(|x| x.into_lua_err())
+                $fn(&*log)(a).map_err(|x| x.into_lua_err())
             }
         }};
     }
@@ -1088,8 +1059,7 @@ pub fn setup_lua_on_arc_rwlock(
             let tp = $trace_provider.clone();
             move |lua: &Lua, a: $arg| {
                 let log = tp.read().unwrap();
-                let adapter = DynAdapter(&**log);
-                $fn(&adapter, lua)(a)
+                $fn(&*log, lua)(a)
             }
         }};
     }
@@ -1099,8 +1069,7 @@ pub fn setup_lua_on_arc_rwlock(
         "en_contains_anywhere",
         lua.create_function(move |_lua: &Lua, (id, needle): (u32, String)| {
             let log = t.read().unwrap();
-            let adapter = DynAdapter(&**log);
-            en_contains_anywhere(&adapter, finder_cache.clone(), reusable_buf.clone())((id, needle))
+            en_contains_anywhere(&*log, finder_cache.clone(), reusable_buf.clone())((id, needle))
                 .map_err(to_lua_err)
         })?,
     )?;
@@ -1110,17 +1079,14 @@ pub fn setup_lua_on_arc_rwlock(
 }
 
 pub fn setup_lua_no_lock(
-    lua: &mut Lua, trace: Arc<TraceProvider>, state: LuaEvalState,
+    lua: &mut Lua, trace: Arc<LogProviderImpl>, state: LuaEvalState,
 ) -> Result<(), mlua::Error> {
     /// INPUT a Fn(impl LogProvider) -> Fn($arg) -> Result<T,E>
     /// OUTPUT a Fn(Arc<RwLock<Box<dyn LogProvider>>> -> Fn(Lua, $arg) -> mlua::Result<T>
     macro_rules! lua_wrap {
         ($trace_provider: expr, $arg: ty, $fn: expr) => {{
             let tp = $trace_provider.clone();
-            move |_lua: &Lua, a: $arg| {
-                let adapter = DynAdapter(&**tp);
-                $fn(&adapter)(a).map_err(|x| x.into_lua_err())
-            }
+            move |_lua: &Lua, a: $arg| $fn(&*tp)(a).map_err(|x| x.into_lua_err())
         }};
     }
 
@@ -1129,10 +1095,7 @@ pub fn setup_lua_no_lock(
     macro_rules! lua_wrap2 {
         ($trace_provider: expr, $arg: ty, $fn: expr) => {{
             let tp = $trace_provider.clone();
-            move |lua: &Lua, a: $arg| {
-                let adapter = DynAdapter(&**tp);
-                $fn(&adapter, lua)(a)
-            }
+            move |lua: &Lua, a: $arg| $fn(&*tp, lua)(a)
         }};
     }
     let LuaEvalState { join_ctx, range, finder_cache, reusable_buf } = state;
@@ -1140,8 +1103,7 @@ pub fn setup_lua_no_lock(
     lua.globals().set(
         "en_contains_anywhere",
         lua.create_function(move |_lua: &Lua, (id, needle): (u32, String)| {
-            let adapter = DynAdapter(&**t);
-            en_contains_anywhere(&adapter, finder_cache.clone(), reusable_buf.clone())((id, needle))
+            en_contains_anywhere(&*t, finder_cache.clone(), reusable_buf.clone())((id, needle))
                 .map_err(to_lua_err)
         })?,
     )?;

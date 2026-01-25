@@ -4,7 +4,8 @@ members = ["example", "gui", "entrace_core", "bench", "entrace_query", "entrace_
 
 [profile.profiling]
 inherits = 'release'
-debug = "line-tables-only"
+debug = true
+
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]
 opt-level = 2
