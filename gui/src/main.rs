@@ -1,5 +1,5 @@
 use egui::{Color32, FontId, TextStyle, Theme, Ui};
-use entrace_core::LevelContainer;
+use entrace_core::{LevelContainer, LogProviderImpl};
 use mimalloc::MiMalloc;
 use std::{
     sync::RwLockReadGuard,
@@ -52,7 +52,7 @@ fn main() -> eframe::Result {
     )
 }
 
-type TraceReader<'a> = RwLockReadGuard<'a, TraceProvider>;
+type TraceReader<'a> = RwLockReadGuard<'a, LogProviderImpl>;
 
 pub fn time<T>(f: impl FnOnce() -> T) -> (Duration, T) {
     let start = Instant::now();

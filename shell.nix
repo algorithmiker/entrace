@@ -32,6 +32,7 @@ pkgs.mkShell {
     rustfmt-nightly
     pkgs.cargo-about
     pkgs.dioxus-cli
+    pkgs.cargo-semver-checks
   ];
   preferLocalBuild = true;
   env.RUSTFLAGS = "-C link-arg=-fuse-ld=mold";

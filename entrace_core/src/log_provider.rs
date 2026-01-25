@@ -1,6 +1,9 @@
 use crate::{
     Header, MetadataRefContainer,
-    remote::{FileIETError, RemoteLogProviderError},
+    remote::{
+        BaseIETLogProvider, FileIETError, FileIETLogProvider, RemoteLogProvider,
+        RemoteLogProviderError,
+    },
     tree_layer::EnValueRef,
 };
 
@@ -44,4 +47,84 @@ pub trait LogProvider {
     /// The [LogProvider] implementation MUST ensure that this terminates quickly,
     /// as it directly affects FPS.
     fn frame_callback(&mut self) {}
+}
+
+pub enum LogProviderImpl {
+    BaseIET(BaseIETLogProvider),
+    FileIET(FileIETLogProvider),
+    Remote(RemoteLogProvider),
+    #[cfg(feature = "mmap")]
+    Mmap(crate::mmap::MmapLogProvider),
+}
+
+impl LogProvider for LogProviderImpl {
+    fn children(&self, x: u32) -> Result<&[u32], LogProviderError> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.children(x),
+            Self::BaseIET(inner) => inner.children(x),
+            Self::FileIET(inner) => inner.children(x),
+            Self::Remote(inner) => inner.children(x),
+        }
+    }
+
+    fn parent(&self, x: u32) -> Result<u32, LogProviderError> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.parent(x),
+            Self::BaseIET(inner) => inner.parent(x),
+            Self::FileIET(inner) => inner.parent(x),
+            Self::Remote(inner) => inner.parent(x),
+        }
+    }
+
+    fn attrs(&'_ self, x: u32) -> Result<Vec<(&'_ str, EnValueRef<'_>)>, LogProviderError> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.attrs(x),
+            Self::BaseIET(inner) => inner.attrs(x),
+            Self::FileIET(inner) => inner.attrs(x),
+            Self::Remote(inner) => inner.attrs(x),
+        }
+    }
+
+    fn header(&'_ self, x: u32) -> Result<Header<'_>, LogProviderError> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.header(x),
+            Self::BaseIET(inner) => inner.header(x),
+            Self::FileIET(inner) => inner.header(x),
+            Self::Remote(inner) => inner.header(x),
+        }
+    }
+
+    fn meta(&'_ self, x: u32) -> Result<MetadataRefContainer<'_>, LogProviderError> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.meta(x),
+            Self::BaseIET(inner) => inner.meta(x),
+            Self::FileIET(inner) => inner.meta(x),
+            Self::Remote(inner) => inner.meta(x),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.len(),
+            Self::BaseIET(inner) => inner.len(),
+            Self::FileIET(inner) => inner.len(),
+            Self::Remote(inner) => inner.len(),
+        }
+    }
+
+    fn frame_callback(&mut self) {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.frame_callback(),
+            Self::BaseIET(inner) => inner.frame_callback(),
+            Self::FileIET(inner) => inner.frame_callback(),
+            Self::Remote(inner) => inner.frame_callback(),
+        }
+    }
 }

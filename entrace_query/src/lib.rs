@@ -1,10 +1,7 @@
-use entrace_core::LogProvider;
-
 pub mod filtersets;
 pub mod lua_api;
 pub mod lua_value;
 
-pub(crate) type TraceProvider = Box<dyn LogProvider + Send + Sync>;
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum QueryError {
     #[error("Index out of bounds. Tried to access element {index} of a container of size {actual}")]

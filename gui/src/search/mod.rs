@@ -13,11 +13,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{TraceProvider, search::query_window::PaginatedResults, spawn_task};
+use crate::{search::query_window::PaginatedResults, spawn_task};
 use crossbeam::channel::Receiver;
 use egui::{Pos2, Rect};
 
-use entrace_core::LogProviderError;
+use entrace_core::{LogProvider, LogProviderError, LogProviderImpl};
 use entrace_query::{
     QueryError,
     lua_api::{JoinCtx, LuaEvalState, setup_lua_on_arc_rwlock},
@@ -101,7 +101,7 @@ pub struct SearchState {
     pub query_timing: Vec<QueryTiming>,
 }
 impl SearchState {
-    pub fn new_query(&mut self, trace_provider: Arc<RwLock<TraceProvider>>) {
+    pub fn new_query(&mut self, trace_provider: Arc<RwLock<LogProviderImpl>>) {
         let (tx, rx) = crossbeam::channel::bounded(1);
         let new_id = self.last_id + 1;
         self.last_id += 1;
@@ -254,7 +254,7 @@ impl LocatingState {
     }
 }
 impl LocatingState {
-    pub fn start_locating(target: u32, trace_provider: &Arc<RwLock<TraceProvider>>) -> Self {
+    pub fn start_locating(target: u32, trace_provider: &Arc<RwLock<LogProviderImpl>>) -> Self {
         let tc = trace_provider.clone();
         let (tx, path_rx) = crossbeam::channel::bounded(1);
         spawn_task(move || {

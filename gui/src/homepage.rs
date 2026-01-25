@@ -1,10 +1,10 @@
 use crate::{
-    App, LevelRepr, LogStatus, TraceProvider, TraceReader, row_height,
+    App, LevelRepr, LogStatus, TraceReader, row_height,
     search::LocatingState,
     tree::{TreeContextMut, tree_view},
 };
 use egui::{CollapsingHeader, Color32, Response, RichText, ScrollArea, Ui, vec2};
-use entrace_core::display_error_context;
+use entrace_core::{LogProvider, LogProviderImpl, display_error_context};
 use std::{
     cell::RefCell,
     sync::{Arc, RwLock},
@@ -24,7 +24,7 @@ impl SpanResponse {
 pub enum SpanContext<'a> {
     QueryResults {
         locating_state: &'a RefCell<LocatingState>,
-        trace_provider: Arc<RwLock<TraceProvider>>,
+        trace_provider: Arc<RwLock<LogProviderImpl>>,
     },
 }
 
