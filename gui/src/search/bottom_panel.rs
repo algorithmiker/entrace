@@ -21,6 +21,24 @@ use crate::{
 #[derive(Default)]
 pub struct SearchTextState {
     pub text: String,
+    pub autocompleter: Autocompleter,
+}
+#[derive(Default)]
+pub enum Autocompleter {
+    #[default]
+    Disabled,
+    Enabled(AutocompleteState),
+}
+impl Autocompleter {
+    pub fn is_some(&self) -> bool {
+        match self {
+            Autocompleter::Disabled => false,
+            Autocompleter::Enabled(_) => true,
+        }
+    }
+}
+#[derive(Default)]
+pub struct AutocompleteState {
     pub matcher: Option<nucleo_matcher::Matcher>,
     pub autocomplete_results: Vec<(usize, &'static str, u32)>,
 
@@ -29,17 +47,17 @@ pub struct SearchTextState {
     pub selected_idx: Option<usize>,
     pub cursor_range: Option<CCursorRange>,
 }
-impl SearchTextState {
-    pub fn recalculate_matches(&mut self, cursor_range: Option<CCursorRange>) {
+
+impl AutocompleteState {
+    pub fn recalculate_matches(&mut self, text: &str, cursor_range: Option<CCursorRange>) {
         if let Some(range) = cursor_range {
             self.cursor_range = Some(range);
         }
 
         let cursor_index = self.cursor_range.map(|r| r.primary.index).unwrap_or(0);
 
-        let byte_pos =
-            self.text.char_indices().nth(cursor_index).map(|(i, _)| i).unwrap_or(self.text.len());
-        let text_to_check = &self.text[..byte_pos];
+        let byte_pos = text.char_indices().nth(cursor_index).map(|(i, _)| i).unwrap_or(text.len());
+        let text_to_check = &text[..byte_pos];
         let last_word = get_current_word(text_to_check);
 
         let old_is_empty = self.autocomplete_results.is_empty();
@@ -79,21 +97,21 @@ impl SearchTextState {
             None => 0,
         });
     }
-    pub fn accept_selection(&mut self, selected: usize) {
+    pub fn accept_selection(&mut self, text: &mut String, selected: usize) {
         let cursor_index = self.cursor_range.map(|r| r.primary.index).unwrap_or(0);
         let byte_cursor_pos =
-            self.text.char_indices().nth(cursor_index).map(|(i, _)| i).unwrap_or(self.text.len());
-        let text_to_check = &self.text[..byte_cursor_pos];
+            text.char_indices().nth(cursor_index).map(|(i, _)| i).unwrap_or(text.len());
+        let text_to_check = &text[..byte_cursor_pos];
         let last_word_len = get_current_word(text_to_check).len();
 
         let result = self.autocomplete_results[selected].1;
         let start = byte_cursor_pos - last_word_len;
-        self.text.replace_range(start..byte_cursor_pos, result);
-        let new_cursor_pos = self.text[..start + result.len()].chars().count();
+        text.replace_range(start..byte_cursor_pos, result);
+        let new_cursor_pos = text[..start + result.len()].chars().count();
         self.cursor_range = Some(CCursorRange::one(CCursor::new(new_cursor_pos)));
         self.selected_idx = None;
         self.force_focus = true;
-        self.recalculate_matches(None);
+        self.recalculate_matches(text, None);
     }
 }
 
@@ -102,33 +120,36 @@ pub fn bottom_panel_ui(
     log_state: &LogState, text_field_margin: Margin,
 ) {
     let text_edit_id = Id::new("bottom-search-text-edit");
-    if ui.memory(|m| m.has_focus(text_edit_id))
-        && !search_state.text.autocomplete_results.is_empty()
+    if let Autocompleter::Enabled(ref mut auto) = search_state.text.autocompleter
+        && ui.memory(|m| m.has_focus(text_edit_id))
+        && !auto.autocomplete_results.is_empty()
     {
         if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab)) {
-            search_state.text.cycle_or_start_selection();
+            auto.cycle_or_start_selection();
         }
-        if let Some(idx) = search_state.text.selected_idx
+        if let Some(idx) = auto.selected_idx
             && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Questionmark))
         {
             api_docs_state.clear_search();
-            api_docs_state.selected_idx = search_state.text.autocomplete_results[idx].0;
+            api_docs_state.selected_idx = auto.autocomplete_results[idx].0;
             api_docs_state.open = true;
         }
-        if let Some(idx) = search_state.text.selected_idx
+        if let Some(idx) = auto.selected_idx
             && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter))
         {
-            search_state.text.accept_selection(idx);
+            auto.accept_selection(&mut search_state.text.text, idx);
         }
     }
     // by displaying the autocomplete area, we steal the focus from the text field, breaking
     // typing. so we need to steal it back.
-    if search_state.text.force_focus {
+    if let Autocompleter::Enabled(ref mut auto) = search_state.text.autocompleter
+        && auto.force_focus
+    {
         ui.memory_mut(|x| x.request_focus(text_edit_id));
         let mut state = egui::TextEdit::load_state(ui.ctx(), text_edit_id).unwrap_or_default();
-        state.cursor.set_char_range(search_state.text.cursor_range);
+        state.cursor.set_char_range(auto.cursor_range);
         state.store(ui.ctx(), text_edit_id);
-        search_state.text.force_focus = false;
+        auto.force_focus = false;
     }
 
     let text_edit = TextEdit::multiline(&mut search_state.text.text)
@@ -142,7 +163,10 @@ pub fn bottom_panel_ui(
 
     let search_response = ui.add_sized(ui.available_size(), text_edit);
 
-    if !search_state.text.autocomplete_results.is_empty() && search_response.has_focus() {
+    if let Autocompleter::Enabled(ref auto) = search_state.text.autocompleter
+        && !auto.autocomplete_results.is_empty()
+        && search_response.has_focus()
+    {
         let popup_id = Id::new("bottom-search-autocomplete-popup");
         let mut pos = search_response.rect.left_top();
         pos.y -= 4.0;
@@ -159,12 +183,10 @@ pub fn bottom_panel_ui(
                             RichText::new("Select: TAB, Accept: Enter, Docs: ?").small(),
                         ));
                         ui.horizontal(|ui| {
-                            for (i, result) in
-                                search_state.text.autocomplete_results.iter().enumerate()
-                            {
+                            for (i, result) in auto.autocomplete_results.iter().enumerate() {
                                 let mut btn = egui::Button::new(result.1)
                                     .sense(Sense::focusable_noninteractive());
-                                if search_state.text.selected_idx == Some(i) {
+                                if auto.selected_idx == Some(i) {
                                     btn = btn.fill(ui.visuals().selection.bg_fill);
                                 }
                                 ui.add(btn);
@@ -175,13 +197,15 @@ pub fn bottom_panel_ui(
             });
     }
 
-    if search_response.changed() || search_response.has_focus() {
-        let cursor_range = if search_state.text.force_focus {
-            search_state.text.cursor_range
+    if let Autocompleter::Enabled(ref mut auto) = search_state.text.autocompleter
+        && (search_response.changed() || search_response.has_focus())
+    {
+        let cursor_range = if auto.force_focus {
+            auto.cursor_range
         } else {
             egui::TextEdit::load_state(ui.ctx(), text_edit_id).and_then(|s| s.cursor.char_range())
         };
-        search_state.text.recalculate_matches(cursor_range);
+        auto.recalculate_matches(&search_state.text.text, cursor_range);
     }
 
     if search_response.has_focus()

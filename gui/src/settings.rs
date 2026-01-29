@@ -19,7 +19,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{
     App,
@@ -27,6 +27,7 @@ use crate::{
         FrameTimeTracker, SamplingFrameTracker, TrackFrameTime, us_to_human, us_to_human_u64,
     },
     rect,
+    search::Autocompleter,
     self_tracing::{SelfTracingLevel, SelfTracingState},
     time_print,
 };
@@ -122,6 +123,7 @@ impl From<&TextGamma> for AlphaFromCoverage {
 // - add it to to_ini()
 // - add it to parse_line()
 // - add it to apply_settings()
+// - display it in settings gui
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub ui_scale: f32,
@@ -130,6 +132,7 @@ pub struct Settings {
     pub theme: egui::ThemePreference,
     pub light_text_gamma: TextGamma,
     pub dark_text_gamma: TextGamma,
+    pub query_autocomplete: bool,
 }
 
 impl Settings {
@@ -141,6 +144,7 @@ impl Settings {
             save_self_trace,
             light_text_gamma,
             dark_text_gamma,
+            query_autocomplete,
         } = self;
         let theme = match theme {
             ThemePreference::Dark => "dark",
@@ -156,7 +160,8 @@ self_tracing = \"{self_tracing}\"
 save_self_trace = {save_self_trace}
 theme = \"{theme}\"
 light_text_gamma = {light_text_gamma}
-dark_text_gamma = {dark_text_gamma}"
+dark_text_gamma = {dark_text_gamma}
+query_autocomplete = {query_autocomplete}"
         )
     }
 }
@@ -169,6 +174,7 @@ impl Default for Settings {
             save_self_trace: true,
             light_text_gamma: TextGamma::Gamma(1.0),
             dark_text_gamma: TextGamma::DarkSpecial,
+            query_autocomplete: true,
         }
     }
 }
@@ -355,6 +361,12 @@ pub fn parse_line(line: &str, settings: &mut Settings) -> Result<(), LoadSetting
             let value = splits.next().ok_or(NoValue)?.trim();
             settings.dark_text_gamma = parse_text_gamma(value)?;
         }
+        "query_autocomplete" => {
+            let value = splits.next().ok_or(NoValue)?.trim();
+            let parsed = str::parse::<bool>(value)
+                .map_err(|x| BadValue { value: value.into(), inner: Box::new(x) })?;
+            settings.query_autocomplete = parsed;
+        }
 
         x => return Err(UnknownKey(x.into())),
     }
@@ -452,6 +464,11 @@ pub fn apply_settings(ctx: &Context, app: &mut App) {
         }
         if let SettingsDialogState::Some { ref mut settings_clone, .. } = app.settings_dialog {
             *settings_clone = inner.settings.clone();
+        }
+        if inner.settings.query_autocomplete {
+            app.search_state.text.autocompleter = Autocompleter::Enabled(Default::default())
+        } else {
+            app.search_state.text.autocompleter = Autocompleter::Disabled;
         }
     }
 }
@@ -586,6 +603,7 @@ fn settings_dialog_inner(ui: &mut Ui, app: &mut App) {
             text_gamma_ui(ui, &mut settings_clone.dark_text_gamma);
         });
     });
+    ui.checkbox(&mut settings_clone.query_autocomplete, "Autocomplete in query box");
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
         if ui.button("Save").clicked()
             && let Err(x) = write_settings(settings_clone).context("Failed to write settings")
@@ -593,6 +611,7 @@ fn settings_dialog_inner(ui: &mut Ui, app: &mut App) {
             app.notifier.error(format!("{x:?}"));
         }
     });
+
     ui.separator();
     ui.label(RichText::new("Ephemeral settings").size(body_size * 1.2));
     ui.label(RichText::new(
