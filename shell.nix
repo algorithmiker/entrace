@@ -1,17 +1,6 @@
-let
-  pinnedPkgsWithFetcher =
-    fetchFromGitHub:
-    fetchFromGitHub {
-      owner = "nixos";
-      repo = "nixpkgs";
-      rev = "523257564973361cc3e55e3df3e77e68c20b0b80";
-      #branch = "nixos-unstable";
-      hash = "sha256-saOixpqPT4fiE/M8EfHv9I98f3sSEvt6nhMJ/z0a7xI=";
-    };
-  pathPkgs = import <nixpkgs> { };
-in
 {
-  pkgs ? import (pinnedPkgsWithFetcher (pathPkgs.fetchFromGitHub)) { },
+  # pkgs is pinned in the flake
+  pkgs ? import <nixpkgs> { },
   rustfmt-nightly ? pkgs.rustfmt,
 }:
 let
