@@ -7,7 +7,7 @@ use std::{
 
 use egui::Context;
 use entrace_core::{
-    IETPresentationConfig,
+    IETPresentationConfig, LogProviderImpl,
     remote::{IETEvent, RemoteLogProvider},
 };
 use tracing::info;
@@ -80,7 +80,9 @@ pub fn connect_dialog(ctx: &Context, app: &mut App) {
                             let meta_open = EnBitVec::repeat(false, 1);
                             app.log_status = LogStatus::Ready(LogState {
                                 file_path: PathBuf::from(&dialog.connect_url),
-                                trace_provider: Arc::new(RwLock::new(Box::new(provider))),
+                                trace_provider: Arc::new(RwLock::new(LogProviderImpl::Remote(
+                                    provider,
+                                ))),
                                 is_open,
                                 meta_open,
                                 locating_state: RefCell::new(LocatingState::None),

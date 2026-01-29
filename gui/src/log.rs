@@ -6,7 +6,7 @@ use std::{
 };
 
 use entrace_core::{
-    LogProvider, display_error_context,
+    LogProvider, LogProviderImpl, display_error_context,
     remote::{IETEvent, Notify, NotifyExt},
 };
 use tracing::{info, trace};
@@ -36,11 +36,9 @@ impl Display for LogStatus {
         }
     }
 }
-/// TODO: try to remove this box by making LogProvider Sized
-pub type TraceProvider = Box<dyn LogProvider + Send + Sync>;
 pub struct LogState {
     pub file_path: PathBuf,
-    pub trace_provider: Arc<RwLock<TraceProvider>>,
+    pub trace_provider: Arc<RwLock<LogProviderImpl>>,
     /// Used for culling.
     pub is_open: EnBitVec,
     pub meta_open: EnBitVec,

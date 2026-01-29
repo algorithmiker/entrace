@@ -1,3 +1,4 @@
+use entrace_core::LogProvider;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
 use clap::Parser;
@@ -17,7 +18,7 @@ fn main() -> anyhow::Result<()> {
     let Args { lua_file, trace_file } = Args::parse();
     let trace = unsafe {
         entrace_core::load_trace(
-            trace_file,
+            &trace_file,
             entrace_core::LoadConfig {
                 iht: IETLoadConfig {
                     watch: FileWatchConfig::DontWatch,
