@@ -434,10 +434,10 @@ pub fn apply_settings(ctx: &Context, app: &mut App) {
         ctx.set_pixels_per_point(inner.settings.ui_scale);
         ctx.set_theme(inner.settings.theme);
         ctx.style_mut_of(egui::Theme::Light, |x| {
-            x.visuals.text_alpha_from_coverage = (&inner.settings.light_text_gamma).into()
+            x.visuals.text_options.alpha_from_coverage = (&inner.settings.light_text_gamma).into()
         });
         ctx.style_mut_of(egui::Theme::Dark, |x| {
-            x.visuals.text_alpha_from_coverage = (&inner.settings.dark_text_gamma).into()
+            x.visuals.text_options.alpha_from_coverage = (&inner.settings.dark_text_gamma).into()
         });
         match app.self_tracing_state {
             SelfTracingState::Disabled => {

@@ -177,7 +177,7 @@ impl App {
         });
     }
 
-    pub fn update_inner(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    pub fn update_inner(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.frame_time_tracker.start_frame();
         match self.settings {
             SettingsState::None => (),
@@ -186,7 +186,7 @@ impl App {
                     match q.context("Failed to load settings") {
                         Ok(x) => {
                             self.settings = SettingsState::Loaded(x);
-                            apply_settings(ctx, self);
+                            apply_settings(ui.ctx(), self);
                         }
                         Err(y) => {
                             let txt = format!("{y:?}");
@@ -204,7 +204,7 @@ impl App {
                         println!("{f}");
                         self.notifier.error(f);
                     } else {
-                        apply_settings(ctx, self);
+                        apply_settings(ui.ctx(), self);
                         info!("Reloaded settings");
                         self.notifier.info("Reloaded settings");
                     }
@@ -220,12 +220,12 @@ impl App {
                 None
             };
             if let Some(path1) = path {
-                self.open_file(path1, ctx.clone());
+                self.open_file(path1, ui.ctx().clone());
                 self.file_picker_state = FilePickerState::NoPick;
             }
         }
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+        egui::Panel::top("top_panel").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Open").clicked() {
@@ -241,7 +241,7 @@ impl App {
                         self.connect_dialog = ConnectionDialog::new_connection();
                     };
                     if ui.button("Quit").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
                 ui.menu_button("Tools", |ui| {
@@ -288,15 +288,15 @@ impl App {
             });
         });
         if let LogStatus::Ready(log_state) = &self.log_status {
-            let font_size = row_height_from_ctx(ctx);
+            let font_size = row_height_from_ctx(ui.ctx());
             let text_field_margin = Margin::symmetric(4, 2);
             let text_field_size =
                 font_size * 2.0 + text_field_margin.topf() + text_field_margin.bottomf();
 
-            egui::TopBottomPanel::bottom("bottom_panel")
-                .min_height(text_field_size)
+            egui::Panel::bottom("bottom_panel")
+                .min_size(text_field_size)
                 .resizable(true)
-                .show(ctx, |ui| {
+                .show_inside(ui, |ui| {
                     search::bottom_panel_ui(
                         ui,
                         &mut self.search_state,
@@ -307,13 +307,13 @@ impl App {
                 });
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            settings::settings_dialog(ctx, self);
-            connect_dialog(ctx, self);
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            settings::settings_dialog(ui.ctx(), self);
+            connect_dialog(ui.ctx(), self);
             convert_dialog::convert_dialog(ui, self);
-            query_windows(ui, ctx, self);
-            about_dialog(ctx, self);
-            api_docs_dialog(ctx, &mut self.api_docs_state);
+            query_windows(ui, self);
+            about_dialog(ui.ctx(), self);
+            api_docs_dialog(ui.ctx(), &mut self.api_docs_state);
             let available_rect = ui.available_rect_before_wrap();
             let notification_area = Rect::from_min_max(
                 Pos2::new(available_rect.right() - 200.0, available_rect.top()),
@@ -332,17 +332,16 @@ pub fn spawn_task(f: impl FnOnce() + Send + 'static) {
     std::thread::spawn(f);
 }
 impl eframe::App for App {
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {}
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {}
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         #[cfg(feature = "dev")]
         {
             return subsecond::call(|| {
                 self.update_inner(ctx, frame);
             });
         }
-        self.update_inner(ctx, frame);
+        self.update_inner(ui, frame);
     }
 }
 

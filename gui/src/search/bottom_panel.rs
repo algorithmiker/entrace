@@ -1,6 +1,6 @@
 use egui::{
-    Color32, CornerRadius, Id, Key, Margin, Modifiers, Rect, Response, RichText, Sense, TextEdit,
-    Ui,
+    Color32, CornerRadius, Frame, Id, Key, Margin, Modifiers, Rect, Response, RichText, Sense,
+    TextEdit, Ui,
     epaint::RectShape,
     pos2,
     text::{CCursor, CCursorRange},
@@ -155,7 +155,7 @@ pub fn bottom_panel_ui(
     let text_edit = TextEdit::multiline(&mut search_state.text.text)
         .desired_width(f32::INFINITY)
         .desired_rows(2)
-        .frame(false)
+        .frame(Frame::NONE)
         .id(text_edit_id)
         .margin(text_field_margin)
         .hint_text("Query")
@@ -214,7 +214,7 @@ pub fn bottom_panel_ui(
         search_state.new_query(log_state.trace_provider.clone());
     }
 
-    let avail = ui.ctx().available_rect();
+    let avail = ui.ctx().content_rect();
     let resize_width = ui.style().visuals.widgets.noninteractive.fg_stroke.width;
     let total_top_padding = resize_width + text_field_margin.topf();
     let search_rect = search_response.rect;
