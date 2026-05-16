@@ -20,7 +20,7 @@ use egui::{Pos2, Rect};
 use entrace_core::{LogProvider, LogProviderError, LogProviderImpl};
 use entrace_query::{
     QueryError,
-    lua_api::{JoinCtx, LuaEvalState, setup_lua_on_arc_rwlock},
+    lua_api::{self, EnMatcher, JoinCtx, LuaEvalState, setup_lua_on_arc_rwlock},
 };
 use mlua::{FromLua, Lua, Value};
 use tracing::{error, info};
@@ -117,7 +117,8 @@ impl SearchState {
             let spans_len = { trace_provider.read().unwrap().len() } as u32;
             let mut items_per_thread = spans_len / threads;
             info!(
-                "spans_len: {spans_len}, threads: {threads} -> items per thread: {items_per_thread}"
+                "spans_len: {spans_len}, threads: {threads} -> items per thread: \
+                 {items_per_thread}"
             );
             if items_per_thread == 0 {
                 threads = 1;
@@ -151,7 +152,8 @@ impl SearchState {
                         let finder_cache = Rc::new(RefCell::new(HashMap::new()));
                         let mut lua = Lua::new();
                         let lua_state = LuaEvalState::new(join_ctx_local, range, finder_cache);
-                        if let Err(y) = setup_lua_on_arc_rwlock(&mut lua, trace_provider, lua_state)
+                        if let Err(y) =
+                            setup_lua_on_arc_rwlock(&mut lua, trace_provider.clone(), lua_state)
                         {
                             let mut rw = results2.write().unwrap();
                             rw[i as usize] = Some(Err(QueryError::LuaError(y)));
@@ -161,10 +163,10 @@ impl SearchState {
                         let loaded: Result<Value, _> =
                             lua.load(&*ta).set_name("search query").eval();
                         info!(elapsed = ?start.elapsed(), "Thread {i} done");
+                        let lock = trace_provider.read().unwrap();
                         match loaded {
                             Ok(x) => {
-                                let ids: Result<_, _> = Vec::from_lua(x, &lua)
-                                    .map_err(QueryError::FailedToCoerce)
+                                let ids: Result<_, _> = lua_result_to_ids(x, &lua, &*lock)
                                     .map(|x| PartialQueryResult { ids: x });
                                 let mut rw = results2.write().unwrap();
                                 rw[i as usize] = Some(ids);
@@ -227,7 +229,29 @@ impl Default for SearchState {
         Self::new()
     }
 }
-
+/// materialize the filterset, if a filterset; or else just extract a Vec<u32>
+fn lua_result_to_ids(
+    result: mlua::Value, lua: &Lua, log: &impl LogProvider,
+) -> Result<Vec<u32>, QueryError> {
+    if let Value::Table(table) = result {
+        if let Ok(s) = table.get::<String>("type")
+            && s == "filterset"
+        {
+            let mut evaluator =
+                lua_api::construct_evaluator(&table).map_err(QueryError::FiltersetEvalFail)?;
+            let root: usize = table.get("root").map_err(QueryError::FiltersetEvalFail)?;
+            evaluator.normalize(root);
+            let matcher = EnMatcher { log };
+            evaluator.materialize(&matcher, root);
+            return Ok(evaluator.results[&root].iter().collect());
+        }
+        let ids: Vec<u32> = Vec::from_lua(mlua::Value::Table(table), lua)
+            .map_err(|_| QueryError::FailedToCoerce)?;
+        Ok(ids)
+    } else {
+        Err(QueryError::FailedToCoerce)
+    }
+}
 pub struct LocatingStarted {
     pub target: u32,
     pub path_rx: Receiver<Vec<u32>>,

@@ -845,22 +845,32 @@ impl<L: LogProvider> Matcher<EnValue> for EnMatcher<'_, L> {
         res
     }
 }
+/// construct an Evaluator that can evaluate the expression in filterset.
+/// You need to normalize and eval yourself.
+pub fn construct_evaluator(
+    filterset: &Table,
+) -> mlua::Result<crate::filtersets::Evaluator<EnValue>> {
+    let mut evaluator = crate::filtersets::Evaluator::new();
+    let items: Table = filterset.get("items")?;
+    let item_cnt = items.len()?;
+
+    for i in 1..=item_cnt {
+        let item: Table = items.get(i)?;
+        let fs = item_to_filterset(&item, |p| evaluator.new_predicate(p))?;
+        evaluator.new_filterset(fs);
+    }
+
+    Ok(evaluator)
+}
 #[doc = include_str!("../api-docs/en_filterset_materialize.md")]
 pub fn en_filterset_materialize(
     log: &impl LogProvider, lua: &Lua,
 ) -> impl Fn(Table) -> mlua::Result<Table> {
     |filterset: Table| {
-        let mut evaluator = crate::filtersets::Evaluator::new();
-        let root: usize = filterset.get("root")?;
-        let items: Table = filterset.get("items")?;
-        let item_cnt = items.len()?;
+        let mut evaluator = construct_evaluator(&filterset)?;
 
-        for i in 1..=item_cnt {
-            let item: Table = items.get(i)?;
-            let fs = item_to_filterset(&item, |p| evaluator.new_predicate(p))?;
-            evaluator.new_filterset(fs);
-        }
         let nstart = Instant::now();
+        let root: usize = filterset.get("root")?;
         evaluator.normalize(root);
         eprintln!("normalization took {:?}", nstart.elapsed());
         let matcher = EnMatcher { log };

@@ -14,10 +14,12 @@ pub enum QueryError {
     #[error("Error while running your query")]
     LuaError(#[source] mlua::Error),
     #[error(
-        "Failed to coerce the result of your query to Vec<u32>. Make sure to return a list from \
-         the query!"
+        "Failed to coerce the result of your query to Vec<u32>. The query should return a list of \
+         integers, or a filterset!"
     )]
-    FailedToCoerce(#[source] mlua::Error),
+    FailedToCoerce,
+    #[error("The filterset returned by your query failed to evaluate")]
+    FiltersetEvalFail(#[source] mlua::Error),
 }
 
 pub mod lua_api_docs {
