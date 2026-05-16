@@ -19,7 +19,7 @@ use entrace_core::{
     LogProviderResult, MetadataRefContainer,
 };
 use memchr::memmem::Finder;
-use mlua::{ExternalError, ExternalResult, IntoLua, Lua, Table, Value};
+use mlua::{ExternalError, ExternalResult, IntoLua, Lua, MultiValue, Table, Value};
 use roaring::RoaringBitmap;
 
 use crate::{
@@ -44,13 +44,13 @@ fn make_oob_error(index: u32, len: usize) -> mlua::Error {
 
 /// Handles the restricted subset of table copying we need.
 /// Doesn't handle tables as keys.
-fn deepcopy_table(lua: &Lua, table: Table) -> mlua::Result<Table> {
+fn deepcopy_table(lua: &Lua, table: &Table) -> mlua::Result<Table> {
     let new_table = lua.create_table()?;
 
     for pair in table.pairs::<Value, Value>() {
         let (k, v) = pair?;
         let v_copy = match v {
-            Value::Table(t2) => mlua::Value::Table(deepcopy_table(lua, t2)?),
+            Value::Table(t2) => mlua::Value::Table(deepcopy_table(lua, &t2)?),
             _ => v,
         };
         new_table.set(k, v_copy)?;
@@ -311,10 +311,16 @@ pub fn en_foreach(
                     results.push(y);
                 }
             }
-            Value::Table(table) => results.extend(table.sequence_values::<u32>().filter_map(|x|x.ok())),
-            x => return Err(anyhow::anyhow!(
-                "Callback in en_foreach returned value of bad type: {x:?}. Only nil, boolean, u32 or array is allowed."
-            ).into_lua_err()),
+            Value::Table(table) => {
+                results.extend(table.sequence_values::<u32>().filter_map(|x| x.ok()))
+            }
+            x => {
+                return Err(anyhow::anyhow!(
+                    "Callback in en_foreach returned value of bad type: {x:?}. Only nil, boolean, \
+                     u32 or array is allowed."
+                )
+                .into_lua_err());
+            }
         }
     }
 
@@ -483,19 +489,25 @@ pub fn en_filterset_from_range(lua: &Lua, (start, end): (usize, usize)) -> mlua:
     Ok(fs)
 }
 
-// en_filter()
-// input:
-//   filter: table with
-//     target: name of variable eg. "message" or "meta.filename"
-//     relation: a relation, one of "EQ", "LT", "GT"
-//     value: a constant to compare with
-//   src: filterset
+// This function can have two parametrizations.
+// The first:
+//   en_filter(filter: Table, src: Table)->Table
+//     filter: table with
+//       target: name of variable eg. "message" or "meta.filename"
+//       relation: a relation, one of "EQ", "LT", "GT"
+//       value: a constant to compare with
+//     src: filterset
+// The second:
+//   en_filter(target: String, relation: String, value: T, src:Table)->Table.
+//   (this is basically the same, just sometimes more convenient)
 // outputs: { type = "filterset", root = 1, items = { src = 0, {type = "rel_dnf", src = 0, clauses = {{ target, relation, value}} }}},
 #[doc = include_str!("../api-docs/en_filter.md")]
-pub fn en_filter(lua: &Lua, (filter, src): (Table, Table)) -> mlua::Result<Table> {
+pub fn en_filter(lua: &Lua, args: MultiValue) -> mlua::Result<Table> {
+    let src = args.back().unwrap().as_table().unwrap();
+
     let old_items: Table = src.get("items")?;
     let items_len = old_items.len()?;
-    let new_items = deepcopy_table(lua, old_items)?;
+    let new_items = deepcopy_table(lua, &old_items)?;
     let old_root: usize = src.get("root")?;
 
     let dnf_filter = lua.create_table()?;
@@ -503,7 +515,15 @@ pub fn en_filter(lua: &Lua, (filter, src): (Table, Table)) -> mlua::Result<Table
     dnf_filter.set("src", old_root)?;
     let clauses_outer = lua.create_table()?;
     let clauses_inner = lua.create_table()?;
-    let pred2 = deepcopy_table(lua, filter)?;
+    let pred2: Table;
+    if args.len() == 2 {
+        pred2 = deepcopy_table(lua, args[0].as_table().unwrap())?;
+    } else {
+        pred2 = lua.create_table()?;
+        pred2.set("target", args[0].clone())?;
+        pred2.set("relation", args[1].clone())?;
+        pred2.set("value", args[2].clone())?;
+    }
 
     clauses_inner.push(pred2)?;
     clauses_outer.push(clauses_inner)?;
@@ -545,7 +565,7 @@ fn concat_items_lists(lua: &Lua, filters: Table) -> mlua::Result<(Table, Vec<i64
         let item_cnt = items.len()?;
         for j in 1..=item_cnt {
             let item: Table = items.get(j)?;
-            let item = deepcopy_table(lua, item)?;
+            let item = deepcopy_table(lua, &item)?;
             increment_item_source(additional_len_before, &item)?;
             all_items.push(item)?;
         }
@@ -681,13 +701,13 @@ pub fn en_filterset_intersect(lua: &Lua, filters: Table) -> mlua::Result<Table> 
 //  }
 #[doc = include_str!("../api-docs/en_filterset_dnf.md")]
 pub fn en_filterset_dnf(lua: &Lua, (clauses, src): (Table, Table)) -> mlua::Result<Table> {
-    let new_fs = deepcopy_table(lua, src)?;
+    let new_fs = deepcopy_table(lua, &src)?;
     let old_root: usize = new_fs.get("root")?;
     let items: Table = new_fs.get("items")?;
 
     let dnf_item = lua.create_table()?;
     dnf_item.set("type", "rel_dnf")?;
-    dnf_item.set("clauses", deepcopy_table(lua, clauses)?)?;
+    dnf_item.set("clauses", deepcopy_table(lua, &clauses)?)?;
     dnf_item.set("src", old_root)?;
     items.push(dnf_item)?;
     new_fs.set("root", items.len()? - 1)?;
@@ -699,7 +719,7 @@ pub fn en_filterset_dnf(lua: &Lua, (clauses, src): (Table, Table)) -> mlua::Resu
 // outputs: a filterset that matches an item exactly if it is not in the filterset.
 #[doc = include_str!("../api-docs/en_filterset_not.md")]
 pub fn en_filterset_not(lua: &Lua, filterset: Table) -> mlua::Result<Table> {
-    let new_fs = deepcopy_table(lua, filterset)?;
+    let new_fs = deepcopy_table(lua, &filterset)?;
     let not = lua.create_table()?;
     not.set("type", "invert")?;
     let new_items: Table = new_fs.get("items")?;
