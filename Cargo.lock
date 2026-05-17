@@ -483,6 +483,7 @@ name = "bench"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "clap",
  "command-error",
 ]
 

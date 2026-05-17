@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
+clap = { version = "4.6.1", features = ["derive"] }
 command-error = "0.8.0"
