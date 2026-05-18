@@ -369,24 +369,22 @@ fn meta_matches(
     }
 }
 /// Returns true if span_value R value
-pub fn values_match(
-    comparator: std::cmp::Ordering, span_value: &EnValueRef, value: &EnValue,
-) -> bool {
-    match value {
-        EnValue::String(a) => match span_value {
+pub fn values_match(comparator: std::cmp::Ordering, here: &EnValueRef, expected: &EnValue) -> bool {
+    match expected {
+        EnValue::String(a) => match here {
             EnValueRef::String(b) => b.cmp(&a.as_str()) == comparator,
             _ => false,
         },
-        EnValue::Bool(a) => match span_value {
+        EnValue::Bool(a) => match here {
             EnValueRef::Bool(b) => b.cmp(a) == comparator,
             _ => false,
         },
-        EnValue::Float(a) => match span_value {
+        EnValue::Float(a) => match here {
             EnValueRef::Float(b) => b.total_cmp(a) == comparator,
             _ => false,
         },
         EnValue::U64(a) => {
-            let span_value_converted = match span_value {
+            let span_value_converted = match here {
                 EnValueRef::U64(x) => *x,
                 EnValueRef::I64(x) => *x as u64,
                 EnValueRef::U128(x) => *x as u64,
@@ -396,7 +394,7 @@ pub fn values_match(
             span_value_converted.cmp(a) == comparator
         }
         EnValue::I64(a) => {
-            let span_value_converted = match span_value {
+            let span_value_converted = match here {
                 EnValueRef::U64(x) => *x as i64,
                 EnValueRef::I64(x) => *x,
                 EnValueRef::U128(x) => *x as i64,
@@ -405,7 +403,7 @@ pub fn values_match(
             };
             span_value_converted.cmp(a) == comparator
         }
-        // we explicitly don't construct these
+        // we explicitly don't construct these from the lua tables
         EnValue::U128(_) => false,
         EnValue::I128(_) => false,
         // table->bytes is not handled for now
@@ -420,6 +418,13 @@ pub fn span_matches_filter(
         let meta = tcc.meta(id).unwrap();
         meta_matches(&meta, target, relation, en_value).map_err(|x| x.into_lua_err()).unwrap()
     } else {
+        if target == "message"
+            && let EnValue::String(expected) = en_value
+        {
+            // TODO: this fast path could be made even faster if it we add a method to LogProvider
+            // to extract the message only
+            return tcc.header(id).unwrap().message.is_some_and(|v| v.cmp(expected) == relation);
+        };
         let attrs = tcc.attrs(id).unwrap();
         let Some((_name, target_here)) = attrs.iter().find(|(name, _)| *name == target) else {
             return false;
