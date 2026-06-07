@@ -179,6 +179,10 @@ impl App {
 
     pub fn update_inner(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.frame_time_tracker.start_frame();
+        #[cfg(debug_assertions)]
+        {
+            ui.set_debug_on_hover(self.ephemeral_settings.debug_layout);
+        }
         match self.settings {
             SettingsState::None => (),
             SettingsState::Loading(ref rx) => {
@@ -338,7 +342,7 @@ impl eframe::App for App {
         #[cfg(feature = "dev")]
         {
             return subsecond::call(|| {
-                self.update_inner(ctx, frame);
+                self.update_inner(ui, frame);
             });
         }
         self.update_inner(ui, frame);

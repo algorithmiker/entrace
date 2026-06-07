@@ -651,6 +651,8 @@ fn settings_dialog_inner(ui: &mut Ui, app: &mut App) {
             app.notifier.error(q);
         }
         ui.checkbox(&mut app.ephemeral_settings.demo_mode, "Demo mode");
+        #[cfg(debug_assertions)]
+        ui.checkbox(&mut app.ephemeral_settings.debug_layout, "Debug layout");
 
         #[allow(clippy::single_element_loop)]
         for benchmark in [&mut app.benchmarks.get_tree] {

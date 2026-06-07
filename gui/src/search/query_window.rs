@@ -1,9 +1,10 @@
 use crate::{
     App, LogState, LogStatus,
     homepage::{SpanContext, span},
+    layout_text,
     search::{Query, QueryError, QueryResult, QueryTiming, search_settings_dialog},
 };
-use egui::{Layout, ScrollArea, Ui, Vec2, Widget};
+use egui::{Layout, ScrollArea, Ui, Widget};
 use entrace_core::display_error_context;
 use std::{cmp::min, fmt::Write, ops::Range};
 use tracing::{error, info};
@@ -112,28 +113,38 @@ impl PaginatedResults {
     }
 }
 pub fn result_list_pagination(ui: &mut Ui, result: &mut QueryResult) {
-    ui.allocate_ui_with_layout(Vec2::ZERO, Layout::left_to_right(egui::Align::Center), |ui| {
-        if ui.button("<").clicked() {
-            result.pages.set_page(result.pages.cur_page.saturating_sub(1));
-        }
-        ui.label("Page ");
-        let ed = egui::TextEdit::singleline(&mut result.pages.page_entry_text)
-            .desired_width(0.0)
-            .clip_text(false)
-            .ui(ui);
-        if ed.lost_focus()
-            && let Ok(x) = str::parse::<usize>(&result.pages.page_entry_text)
-        {
-            result.pages.set_page(x);
-        }
-        ui.label(format!("/ {}", result.pages.page_cnt()));
-        if ui.button(">").clicked() {
-            result.pages.set_page(result.pages.cur_page.saturating_add(1));
-        }
+    ui.columns_const(|[left, right]| {
+        left.horizontal(|ui| {
+            if ui.button("<").clicked() {
+                result.pages.set_page(result.pages.cur_page.saturating_sub(1));
+            }
+            let page_cnt = result.pages.page_cnt();
+
+            let page_cnt_galley = layout_text(ui, format!("Page {page_cnt}/{page_cnt}"));
+            let desired_width =
+                page_cnt_galley.rect.width() + 2.0 * ui.style().spacing.item_spacing.x;
+            let ed = egui::TextEdit::singleline(&mut result.pages.page_entry_text)
+                .desired_width(desired_width)
+                .clip_text(false)
+                .prefix("Page")
+                .suffix(format!("/{page_cnt}"))
+                .ui(ui);
+
+            if ed.lost_focus()
+                && let Ok(x) = str::parse::<usize>(&result.pages.page_entry_text)
+            {
+                result.pages.set_page(x);
+            }
+            if ui.button(">").clicked() {
+                result.pages.set_page(result.pages.cur_page.saturating_add(1));
+            }
+        });
+        right.with_layout(Layout::top_down(egui::Align::Max), |ui| {
+            ui.label(format!("{} spans.", result.ids.len()));
+        });
     });
 }
 pub fn query_result_list(ui: &mut Ui, result: &mut QueryResult, log: &mut LogState) {
-    ui.label(format!("Got {} spans.", result.ids.len()));
     result_list_pagination(ui, result);
     ScrollArea::new([false, true]).auto_shrink([false, false]).stick_to_bottom(false).show(
         ui,

@@ -2,7 +2,7 @@ use egui::{Color32, FontId, TextStyle, Theme, Ui};
 use entrace_core::{LevelContainer, LogProviderImpl};
 use mimalloc::MiMalloc;
 use std::{
-    sync::RwLockReadGuard,
+    sync::{Arc, RwLockReadGuard},
     time::{Duration, Instant},
 };
 use tracing::info;
@@ -152,4 +152,16 @@ macro_rules! icon_colored {
         let img = egui::Image::new(egui::include_image!($src));
         img.tint($color)
     }};
+}
+/// Can be used for example to measure text layout.
+/// Assumes no wrapping.
+fn layout_text(ui: &mut Ui, text: String) -> Arc<egui::Galley> {
+    let font_id = TextStyle::resolve(&TextStyle::Body, ui.style());
+    let text_color = ui.visuals().noninteractive().fg_stroke.color;
+    ui.fonts_mut(|x| x.layout_no_wrap(text, font_id, text_color))
+}
+
+/// Debug-paint the available rect at ui
+fn debug_available(ui: &mut Ui, text: &str) {
+    ui.painter().debug_rect(ui.available_rect_before_wrap(), Color32::RED, text);
 }
