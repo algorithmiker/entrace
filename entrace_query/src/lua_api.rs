@@ -421,10 +421,8 @@ pub fn span_matches_filter(
         if target == "message"
             && let EnValue::String(expected) = en_value
         {
-            // TODO: this fast path could be made even faster if it we add a method to LogProvider
-            // to extract the message only
-            return tcc.header(id).unwrap().message.is_some_and(|v| v.cmp(expected) == relation);
-        };
+            return tcc.message(id).unwrap().is_some_and(|v| v.cmp(expected) == relation);
+        }
         let attrs = tcc.attrs(id).unwrap();
         let Some((_name, target_here)) = attrs.iter().find(|(name, _)| *name == target) else {
             return false;
