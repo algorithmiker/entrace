@@ -47,6 +47,11 @@ pub trait LogProvider {
     /// The [LogProvider] implementation MUST ensure that this terminates quickly,
     /// as it directly affects FPS.
     fn frame_callback(&mut self) {}
+
+    /// Equivalent to header.message, but some implementations might offer a fast path for this.
+    fn message(&'_ self, x: u32) -> Result<Option<&'_ str>, LogProviderError> {
+        Ok(self.header(x)?.message)
+    }
 }
 
 pub enum LogProviderImpl {
@@ -95,6 +100,15 @@ impl LogProvider for LogProviderImpl {
             Self::BaseIET(inner) => inner.header(x),
             Self::FileIET(inner) => inner.header(x),
             Self::Remote(inner) => inner.header(x),
+        }
+    }
+    fn message(&'_ self, x: u32) -> Result<Option<&str>, LogProviderError> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.message(x),
+            Self::BaseIET(inner) => inner.message(x),
+            Self::FileIET(inner) => inner.message(x),
+            Self::Remote(inner) => inner.message(x),
         }
     }
 

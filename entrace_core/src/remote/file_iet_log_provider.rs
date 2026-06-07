@@ -330,6 +330,10 @@ impl LogProvider for FileIETLogProvider {
         self.0.header(x)
     }
 
+    fn message(&'_ self, x: u32) -> LogProviderResult<Option<&str>> {
+        self.0.message(x)
+    }
+
     fn meta(&'_ self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
         self.0.meta(x)
     }

@@ -107,6 +107,14 @@ impl LogProvider for BaseIETLogProvider {
         };
         Ok(h)
     }
+    fn message(&'_ self, idx: u32) -> LogProviderResult<Option<&str>> {
+        let idx = idx as usize;
+        let y = self
+            .data
+            .get(idx)
+            .ok_or_else(|| LogProviderError::OutOfBounds { idx, len: self.len() })?;
+        Ok(y.message.as_deref())
+    }
 
     fn meta(&'_ self, idx: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
         let idx = idx as usize;

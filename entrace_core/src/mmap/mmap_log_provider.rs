@@ -96,7 +96,19 @@ impl LogProvider for MmapLogProvider {
             message: decoded.0.message,
         })
     }
+    fn message(&'_ self, x: u32) -> Result<Option<&'_ str>, LogProviderError> {
+        let offset = self.offset_of(x)?;
+        // only deserialize what we need
+        #[derive(Serialize, Deserialize)]
+        struct HeaderPart<'a> {
+            parent: u32,
+            message: Option<&'a str>,
+        }
+        let decoded: (HeaderPart, _) =
+            bincode::serde::borrow_decode_from_slice(&self.map[offset..], BINCODE_STD)?;
 
+        Ok(decoded.0.message)
+    }
     fn meta(&self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
         let offset = self.offset_of(x)?;
         let decoded: (TraceEntryRef, _) =
