@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct CliArgs {
-    #[arg(long, short, default_value = "Git(HEAD)", value_parser = parse_source_desc)]
+    #[arg(long, short, value_parser = parse_source_desc)]
     pub revisions: Vec<SourceDesc>,
     #[command(subcommand)]
     pub target: Target,

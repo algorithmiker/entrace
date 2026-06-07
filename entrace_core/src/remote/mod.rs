@@ -139,7 +139,7 @@ impl LogProvider for BaseIETLogProvider {
                                     self.pool[event.parent as usize].children.push(idx as u32);
                                 }
                             }
-                            self.data.extend(events.into_iter());
+                            self.data.extend(events);
                         }
                     }
                 }

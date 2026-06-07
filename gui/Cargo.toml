@@ -25,12 +25,11 @@ rfd = "0.17.2"
 thiserror = "2.0.12"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
-
-# dev only
-dioxus-devtools = {version = "0.7.2", optional = true}
-subsecond = {version = "0.7.2", optional = true}
 nucleo-matcher = "0.3.1"
 
+# dev only
+subsecond = {version = "0.7.2", optional = true}
+dioxus-devtools = {version = "0.7.2", optional = true}
 [features]
 dev = ["dep:subsecond", "dep:dioxus-devtools"]
 

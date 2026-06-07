@@ -51,14 +51,11 @@ fn script_bench(
     let paths: Vec<_> =
         revs.iter().map(|x| benchdir.join(format!("script-{}", x.executable_name()))).collect();
     for (source, path) in revs.iter().zip(&paths) {
-        if fs::exists(&path).unwrap_or(false)
-            && let SourceDesc::GitRevision(_) = source
-        {
-            debug!("Already have {path:?}.");
-            continue;
-        }
-
         if let SourceDesc::GitRevision(x) = source {
+            if fs::exists(path).unwrap_or(false) {
+                debug!("Already have {path:?}.");
+                continue;
+            }
             debug!("Checking out and compiling {x}");
             Command::new("git").arg("checkout").arg(x).output_checked()?;
         } else {

@@ -288,7 +288,7 @@ impl<T> Evaluator<T> {
                     for dnf in dnfs.iter().skip(1) {
                         let (c, _) = self.dead_and_take_dnf(*dnf);
                         or_clauses.remove(dnf);
-                        firstc.extend(c.into_iter());
+                        firstc.extend(c);
                     }
                     self.pool[dnfs[0]] = Filterset::RelDnf(firstc, *source);
                 }
