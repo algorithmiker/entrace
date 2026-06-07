@@ -88,13 +88,9 @@ impl LogProvider for MmapLogProvider {
             .ok_or_else(|| LogProviderError::OutOfBounds { idx: idx as usize, len: self.len() })?;
         let decoded: (HeaderPart, usize) =
             bincode::serde::borrow_decode_from_slice(from_offset, BINCODE_STD)?;
-        Ok(Header {
-            name: decoded.0.metadata.name,
-            level: decoded.0.metadata.level,
-            file: decoded.0.metadata.file,
-            line: decoded.0.metadata.line,
-            message: decoded.0.message,
-        })
+        let HeaderPart { message, metadata: MetadataPart { name, level, file, line, .. }, .. } =
+            decoded.0;
+        Ok(Header { name, level, file, line, message })
     }
     fn message(&'_ self, x: u32) -> Result<Option<&'_ str>, LogProviderError> {
         let offset = self.offset_of(x)?;
