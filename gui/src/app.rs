@@ -92,7 +92,11 @@ impl App {
         cc.egui_ctx.style_mut_of(Theme::Light, |style| {
             style.visuals.window_stroke = Stroke::new(0.5, Color32::BLACK);
             style.visuals.panel_fill = Color32::WHITE;
-            style.visuals.widgets.inactive.bg_stroke = Stroke::new(0.4, Color32::BLACK);
+            let widgets = &mut style.visuals.widgets;
+            widgets.inactive.bg_stroke = Stroke::new(
+                widgets.active.bg_stroke.width,
+                Color32::from_rgba_unmultiplied(0, 0, 0, 64),
+            );
             //println!("{:?}", style.visuals.widgets.noninteractive.bg_stroke);
             // style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(0.7, Color32::DARK_GRAY);
         });
