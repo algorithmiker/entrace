@@ -89,6 +89,10 @@
             pname = "entrace-script";
             cargoExtraArgs = "-p entrace_script";
           };
+          entrace_convert = craneWithCommonArgs {
+            pname = "entrace-script";
+            cargoExtraArgs = "-p entrace_convert";
+          };
         }
       );
     };
