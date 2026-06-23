@@ -322,8 +322,15 @@ impl LogProvider for FileIETLogProvider {
         self.0.parent(x)
     }
 
-    fn attrs(&'_ self, x: u32) -> LogProviderResult<Vec<(&'_ str, EnValueRef<'_>)>> {
-        self.0.attrs(x)
+    fn attr_names(&'_ self, x: u32) -> LogProviderResult<Vec<&'_ str>> {
+        self.0.attr_names(x)
+    }
+
+    fn attr_values(&'_ self, x: u32) -> LogProviderResult<Vec<EnValueRef<'_>>> {
+        self.0.attr_values(x)
+    }
+    fn attr_value(&'_ self, x: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>> {
+        self.0.attr_value(x, name)
     }
 
     fn header(&'_ self, x: u32) -> LogProviderResult<Header<'_>> {

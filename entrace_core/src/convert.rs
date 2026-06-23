@@ -1,6 +1,12 @@
-use std::io::{Read, Seek, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, Write};
 
-use crate::{PoolEntry, TraceEntry, entrace_magic_for};
+use bincode::config::Configuration;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    EN_DISK_VERSION, EnValue, MagicParseError, MetadataContainer, PoolEntry, StorageFormat,
+    TraceEntry, entrace_magic_for, parse_entrace_magic,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum ConvertError {
@@ -8,6 +14,10 @@ pub enum ConvertError {
     OutWriteError(#[source] std::io::Error),
     #[error("Failed to read from input buffer")]
     ReadInputError(#[source] std::io::Error),
+    #[error("Failed to write to temporary buffer")]
+    TempWriteError(#[source] std::io::Error),
+    #[error("Failed to parse magic")]
+    MagicParseError(#[from] MagicParseError),
     #[error("Wanted to read input starting from offset {0} but there is no data left")]
     NotEnoughBytes(usize),
     #[error("Failed to encode some data")]
@@ -16,6 +26,10 @@ pub enum ConvertError {
     DecodeError(#[from] bincode::error::DecodeError),
     #[error("Failed to gather IET header")]
     GatherError(#[source] Box<ConvertError>),
+    #[error("Input file has version {0}, but I'm told to convert from version {1}")]
+    InputVersionMismatch(u8, u8),
+    #[error("Input file has format {0:?}, but I'm told to convert from format {1:?}")]
+    InputFormatMismatch(StorageFormat, StorageFormat),
 }
 
 /// Convert an IET file to a ET file.
@@ -119,7 +133,7 @@ pub fn iet_to_et_with_table<W: Write, R: Read + Seek>(
     table: &IETTableDataRef, inp: &mut R, out: &mut W, skip_magic: bool,
 ) -> Result<(), ConvertError> {
     use ConvertError::*;
-    let magic = entrace_magic_for(1, crate::StorageFormat::ET);
+    let magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::ET);
     out.write_all(&magic).map_err(OutWriteError)?;
 
     let config = bincode::config::standard();
@@ -143,7 +157,7 @@ pub fn et_to_iet<W: Write, R: Read + Seek>(
     inp: &mut R, out: &mut W, skip_magic: bool,
 ) -> Result<(), ConvertError> {
     use ConvertError::*;
-    let magic = entrace_magic_for(1, crate::StorageFormat::IET);
+    let magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::IET);
     out.write_all(&magic).map_err(OutWriteError)?;
     if skip_magic {
         inp.seek(std::io::SeekFrom::Start(10)).map_err(ReadInputError)?;

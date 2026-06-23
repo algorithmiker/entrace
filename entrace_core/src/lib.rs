@@ -53,7 +53,6 @@ impl From<&tracing::Level> for LevelContainer {
         }
     }
 }
-pub type Attrs = Vec<(String, EnValue)>;
 
 // Warning: be extremely careful when changing the fields of this type,
 // as bincode writes things in the order declared here!
@@ -154,19 +153,22 @@ pub struct Header<'a> {
     pub message: Option<&'a str>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum StorageFormat {
     ET = 0,
     IET = 1,
     IETPrefix = 2,
 }
-pub const EN_DISK_VERSION: u8 = 1;
+/// A copy of entrace supports only one file format, with conversion scripts provided in entrace_convert.
+/// So this is both the "read" and "write" version.
+pub const EN_DISK_VERSION: u8 = 2;
 #[derive(Error, Debug)]
 pub enum LoadTraceError {
     #[error("Failed to parse magic number")]
     BadMagic(#[from] MagicParseError),
     #[error(
-        "Cannot parse newer disk format than known. I have {EN_DISK_VERSION}, the file has {0}"
+        "This file has version {0}, but this client only supports version {EN_DISK_VERSION}.\nUse \
+         entrace_convert to update your files to the newest version."
     )]
     InvalidVersion(u8),
     #[error("No version header, are you sure this is a entrace log?")]

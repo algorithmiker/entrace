@@ -1,4 +1,7 @@
-use crate::{StorageFormat, TraceEntry, entrace_magic_for, storage::Storage, tree_layer::EnValue};
+use crate::{
+    EN_DISK_VERSION, EnValueRef, StorageFormat, TraceEntry, entrace_magic_for, storage::Storage,
+    tree_layer::EnValue,
+};
 use crossbeam_channel::{SendError, Sender};
 use std::{any::Any, collections::BTreeMap, io::Write, sync::RwLock, thread::JoinHandle};
 
@@ -44,7 +47,7 @@ impl<T: Write + Send + 'static> IETStorage<T> {
         let format =
             if config.length_prefixed { StorageFormat::IETPrefix } else { StorageFormat::IET };
         let thread_handle = std::thread::spawn(move || {
-            let magic = entrace_magic_for(1, format);
+            let magic = entrace_magic_for(EN_DISK_VERSION, format);
             config.writable.write_all(&magic).unwrap();
             let mut buffer: Vec<u8> = Vec::with_capacity(1024);
             /// Write a length-prefixed message.
@@ -101,18 +104,17 @@ impl<T: Write + Send + 'static> IETStorage<T> {
 }
 impl<T: Write + Send + 'static> Storage for IETStorage<T> {
     fn new_span(
-        &self, id: u32, parent: u32, attrs: crate::Attrs, meta: &'static tracing::Metadata<'_>,
+        &self, id: u32, parent: u32, attr_names: Vec<String>, attr_values: Vec<EnValue>,
+        meta: &'static tracing::Metadata<'_>,
     ) {
-        let message = attrs.iter().find(|x| x.0 == "message").map(|x| match &x.1 {
-            EnValue::String(y) => y.clone(),
-            q => format!("{q:?}"),
-        });
-        self.sender
-            .send(RemoteMessage::NewSpan {
-                id,
-                entry: TraceEntry { parent, message, metadata: meta.into(), attributes: attrs },
-            })
-            .ok();
+        let mut entry =
+            TraceEntry::from_unsorted_attrs(parent, None, meta.into(), attr_names, attr_values);
+        if let Some(val) = entry.as_ref().get_attr("message")
+            && let EnValueRef::String(s) = val
+        {
+            entry.message = Some(s.to_string())
+        }
+        self.sender.send(RemoteMessage::NewSpan { id, entry }).ok();
     }
 }
 

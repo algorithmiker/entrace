@@ -12,6 +12,7 @@ bincode = { version = "2.0.1", features = ["serde"] }
 crossbeam-channel = "0.5.15"
 memmap2 = {version = "0.9.7", optional = true }
 notify = {version = "8.1.0", optional = true }
+permutation = "0.4.1"
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.12"
 tracing = { version = "0.1.41", default-features = false }
