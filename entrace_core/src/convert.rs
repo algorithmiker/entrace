@@ -1,6 +1,12 @@
-use std::io::{Read, Seek, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, Write};
 
-use crate::{PoolEntry, TraceEntry, entrace_magic_for};
+use bincode::config::Configuration;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    EN_DISK_VERSION, EnValue, MagicParseError, MetadataContainer, PoolEntry, StorageFormat,
+    TraceEntry, entrace_magic_for, parse_entrace_magic,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum ConvertError {
@@ -8,6 +14,10 @@ pub enum ConvertError {
     OutWriteError(#[source] std::io::Error),
     #[error("Failed to read from input buffer")]
     ReadInputError(#[source] std::io::Error),
+    #[error("Failed to write to temporary buffer")]
+    TempWriteError(#[source] std::io::Error),
+    #[error("Failed to parse magic")]
+    MagicParseError(#[from] MagicParseError),
     #[error("Wanted to read input starting from offset {0} but there is no data left")]
     NotEnoughBytes(usize),
     #[error("Failed to encode some data")]
@@ -16,6 +26,10 @@ pub enum ConvertError {
     DecodeError(#[from] bincode::error::DecodeError),
     #[error("Failed to gather IET header")]
     GatherError(#[source] Box<ConvertError>),
+    #[error("Input file has version {0}, but I'm told to convert from version {1}")]
+    InputVersionMismatch(u8, u8),
+    #[error("Input file has format {0:?}, but I'm told to convert from format {1:?}")]
+    InputFormatMismatch(StorageFormat, StorageFormat),
 }
 
 /// Convert an IET file to a ET file.
@@ -119,7 +133,7 @@ pub fn iet_to_et_with_table<W: Write, R: Read + Seek>(
     table: &IETTableDataRef, inp: &mut R, out: &mut W, skip_magic: bool,
 ) -> Result<(), ConvertError> {
     use ConvertError::*;
-    let magic = entrace_magic_for(1, crate::StorageFormat::ET);
+    let magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::ET);
     out.write_all(&magic).map_err(OutWriteError)?;
 
     let config = bincode::config::standard();
@@ -143,7 +157,7 @@ pub fn et_to_iet<W: Write, R: Read + Seek>(
     inp: &mut R, out: &mut W, skip_magic: bool,
 ) -> Result<(), ConvertError> {
     use ConvertError::*;
-    let magic = entrace_magic_for(1, crate::StorageFormat::IET);
+    let magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::IET);
     out.write_all(&magic).map_err(OutWriteError)?;
     if skip_magic {
         inp.seek(std::io::SeekFrom::Start(10)).map_err(ReadInputError)?;
@@ -159,5 +173,112 @@ pub fn et_to_iet<W: Write, R: Read + Seek>(
     // number of items
     let _pool: Vec<PoolEntry> = bincode::serde::decode_from_std_read(inp, config)?;
     std::io::copy(inp, out).map_err(OutWriteError)?;
+    Ok(())
+}
+
+// Old trace entry, from version 1
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct TraceEntry1 {
+    pub parent: u32,
+    pub message: Option<String>,
+    pub metadata: MetadataContainer,
+    pub attributes: Vec<(String, EnValue)>,
+}
+
+impl TraceEntry1 {
+    pub fn into_trace_entry_2(self) -> TraceEntry {
+        let TraceEntry1 { parent, message, metadata, mut attributes } = self;
+        attributes.sort_unstable_by(|x, y| x.0.cmp(&y.0));
+        let (attr_names, attr_values) = attributes.into_iter().unzip();
+
+        TraceEntry::from_sorted_attrs(parent, message, metadata, attr_names, attr_values)
+    }
+}
+/// Convert a version 1 et file to a version 2 (latest as of writing) format.
+/// It is the caller's responsibility to buffer IO, but temp SHOULD not be buffered
+/// (it'll be buffered internally, separately for read/write).
+///
+/// Temp MUST be an EMPTY scratch buffer (eg. a temp file)
+/// If [skip_validating_magic] is set, it will not try to parse the magic, and assume you've already validated
+/// this is an ET-v1 file.
+pub fn et_v1_to_v2<W: Write, R: Read + Seek, RW: Read + Write + Seek>(
+    inp: &mut R, out: &mut W, temp: &mut RW, skip_validating_magic: bool,
+) -> Result<(), ConvertError> {
+    use ConvertError::*;
+    use bincode::serde::{decode_from_std_read, encode_into_std_write};
+    const CFG: Configuration = bincode::config::standard();
+
+    if !skip_validating_magic {
+        let mut input_magic = [0; 10];
+        inp.read_exact(&mut input_magic).map_err(ReadInputError)?;
+        let (version, ty) = parse_entrace_magic(&input_magic)?;
+        if version != 1 {
+            return Err(ConvertError::InputVersionMismatch(version, 1));
+        } else if ty != StorageFormat::ET {
+            return Err(ConvertError::InputFormatMismatch(ty, StorageFormat::ET));
+        }
+    }
+
+    let _inp_offsets: Vec<u64> = decode_from_std_read(inp, CFG)?;
+    let child_lists: Vec<PoolEntry> = decode_from_std_read(inp, CFG)?;
+
+    let mut temp_writer = BufWriter::new(temp);
+    let mut new_offsets = vec![];
+    for _processed in 0..child_lists.len() {
+        let offset = temp_writer.stream_position().map_err(ReadInputError)?;
+        new_offsets.push(offset);
+
+        let entry1: TraceEntry1 = decode_from_std_read(inp, CFG)?;
+        encode_into_std_write(entry1.into_trace_entry_2(), &mut temp_writer, CFG)?;
+    }
+    temp_writer.seek(std::io::SeekFrom::Start(0)).map_err(TempWriteError)?;
+    let temp = temp_writer.into_inner().map_err(|x| TempWriteError(x.into_error()))?; // this will flush too
+
+    let out_magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::ET);
+    out.write_all(&out_magic).map_err(OutWriteError)?;
+    encode_into_std_write(new_offsets, out, CFG)?;
+    encode_into_std_write(child_lists, out, CFG)?;
+    let mut temp_reader = BufReader::new(temp);
+    std::io::copy(&mut temp_reader, out).map_err(OutWriteError)?;
+
+    Ok(())
+}
+
+/// Convert a version 1 iet file to a version 2 (latest as of writing) format.
+/// It is the caller's responsibility to buffer IO.
+pub fn iet_v1_to_v2<W: Write, R: Read + Seek>(
+    inp: &mut R, out: &mut W,
+) -> Result<(), ConvertError> {
+    use ConvertError::*;
+    use bincode::serde::{decode_from_std_read, encode_into_std_write};
+    const CFG: Configuration = bincode::config::standard();
+
+    let mut input_magic = [0; 10];
+    inp.read_exact(&mut input_magic).map_err(ReadInputError)?;
+    let (version, ty) = parse_entrace_magic(&input_magic)?;
+    if version != 1 {
+        return Err(ConvertError::InputVersionMismatch(version, 1));
+    } else if ty != StorageFormat::ET {
+        return Err(ConvertError::InputFormatMismatch(ty, StorageFormat::IET));
+    }
+
+    let out_magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::ET);
+    out.write_all(&out_magic).map_err(OutWriteError)?;
+
+    loop {
+        let decoded: Result<TraceEntry1, _> = decode_from_std_read(inp, CFG);
+        match decoded {
+            Ok(x) => encode_into_std_write(x.into_trace_entry_2(), out, CFG)?,
+            Err(y) => match y {
+                bincode::error::DecodeError::Io { inner, .. }
+                    if inner.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    break;
+                }
+                _ => return Err(ConvertError::DecodeError(y)),
+            },
+        };
+    }
+
     Ok(())
 }

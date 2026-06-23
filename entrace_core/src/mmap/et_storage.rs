@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    MixedTraceEntry, PoolEntry, TraceEntry,
+    EN_DISK_VERSION, EnValueRef, MixedTraceEntry, PoolEntry, TraceEntry,
     convert::{self, ConvertError, IETTableDataRef},
     entrace_magic_for,
     mmap::ETShutdownValue,
@@ -54,7 +54,7 @@ impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q>
     {
         let (tx, rx) = crossbeam_channel::unbounded::<Message<Q>>();
         let thread_handle = std::thread::spawn(move || {
-            let magic = entrace_magic_for(1, crate::StorageFormat::IET);
+            let magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::IET);
             file.write_all(&magic).unwrap();
             let mut writer = BufWriter::new(&mut file);
             // Offsets relative to the start of the data section
@@ -134,13 +134,21 @@ impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q>
 }
 impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> Storage for ETStorage<T, Q> {
     fn new_span(
-        &self, id: u32, parent: u32, attrs: crate::Attrs, meta: &'static tracing::Metadata<'_>,
+        &self, id: u32, parent: u32, attr_names: Vec<String>, attr_values: Vec<EnValue>,
+        meta: &'static tracing::Metadata<'_>,
     ) {
-        let message = attrs.iter().find(|x| x.0 == "message").map(|x| match &x.1 {
-            EnValue::String(y) => y.clone(),
-            q => format!("{q:?}"),
-        });
-        let entry = MixedTraceEntry { parent, metadata: meta.into(), attributes: attrs, message };
+        let mut entry = MixedTraceEntry::from_unsorted_attrs(
+            parent,
+            None,
+            meta.into(),
+            attr_names,
+            attr_values,
+        );
+        if let Some(val) = entry.as_ref().get_attr("message")
+            && let EnValueRef::String(s) = val
+        {
+            entry.message = Some(s.to_string())
+        }
 
         self.sender.send(Message::Entry { id, entry }).ok();
     }

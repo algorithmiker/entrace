@@ -73,14 +73,21 @@ pub fn span(
                 ui.label(format!("level: {:?}", meta.level));
             });
             //ui.label("ATTRS:");
-            let span_data = match trace_reader.attrs(id) {
-                Ok(span_data) => span_data,
+            let attr_names = match trace_reader.attr_names(id) {
+                Ok(x) => x,
                 Err(y) => {
                     ui.label(display_error_context(&y));
                     return;
                 }
             };
-            for (x, y) in span_data {
+            let attr_values = match trace_reader.attr_values(id) {
+                Ok(x) => x,
+                Err(y) => {
+                    ui.label(display_error_context(&y));
+                    return;
+                }
+            };
+            for (x, y) in attr_names.into_iter().zip(attr_values) {
                 ui.label(format!("{x}: {y}",));
             }
         }

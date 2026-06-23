@@ -4,9 +4,7 @@ use std::{
     ops::{Deref, Range},
 };
 
-use egui::{
-    Color32, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, epaint::RectShape, pos2, vec2,
-};
+use egui::{Color32, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
 use entrace_core::{LogProvider, MetadataRefContainer, display_error_context};
 use tracing::{debug, info, warn};
 
@@ -143,7 +141,9 @@ impl TreeView {
     ) {
         self.add_row(Row::SpanHeader(id), span_depth);
         if open_reader.get(id as usize).unwrap_or(false) {
-            match log_reader.attrs(id) {
+            let attr_names = log_reader.attr_names(id);
+            let attrs = attr_names.and_then(|x| Ok(x.into_iter().zip(log_reader.attr_values(id)?)));
+            match attrs {
                 Ok(attrs) => {
                     for (name, val) in attrs {
                         let f = format!("{name}: {val}");
@@ -203,159 +203,8 @@ pub fn tree_view<'t, 'o, 'l>(
         let left_pad = *depth as f32 * ui.spacing().indent;
         let padded_rect = rect!(original_min + vec2(left_pad, 0.0), pos2(f32::MAX, original_max.y));
         let scope_resp = ui
-            .scope_builder(UiBuilder::new().max_rect(padded_rect), |ui| match row {
-                Row::SpanHeader(id) => {
-                    let header = match ctx.log_reader.header(*id) {
-                        Ok(header) => header,
-                        Err(y) => {
-                            let f = display_error_context(&y);
-                            ui.label(format!("Failed to get header for {id}: {f}"));
-                            return;
-                        }
-                    };
-
-                    let level_repr = header.level.repr(ui.ctx().theme());
-                    let mut _elided_header = false;
-                    let header_text_orig = if let Some(message) = header.message {
-                        format!("{}: {}", level_repr.0, message)
-                    } else if *id == 0 {
-                        "root".to_string()
-                    } else {
-                        header.name.into()
-                    };
-                    let header_text =
-                        if let Some(nlp) = memchr::memchr(b'\n', header_text_orig.as_bytes()) {
-                            _elided_header = true;
-                            format!("{}...", &header_text_orig[..nlp])
-                        } else {
-                            header_text_orig.clone()
-                        };
-
-                    let is_open = ctx.open_writer.get(*id as usize).unwrap_or(false);
-                    let size = vec2(ui.spacing().icon_width, ui.spacing().icon_width);
-                    ui.horizontal(|ui| {
-                        let available_rect = ui.available_rect_before_wrap();
-                        let (_icon_id, icon_rect) = ui.allocate_space(size);
-                        let ui_header = egui::Label::new(
-                            RichText::new(header_text).background_color(level_repr.1),
-                        )
-                        .sense(Sense::hover());
-                        let label_resp = ui.add(ui_header);
-                        //let label_resp = label_resp.on_hover_ui(|ui| {
-                        //    ui.label(header_text_orig);
-                        //});
-                        let interact_id = ui.id().with(id);
-                        let interact_rect =
-                            label_resp.rect.with_min_x(0.0).with_max_x(available_rect.max.x);
-                        let interact = ui.interact(interact_rect, interact_id, Sense::click());
-                        if interact.clicked() {
-                            ctx.open_writer.toggle(*id as usize);
-                            invalidate = true;
-                        }
-                        if interact.clicked_by(egui::PointerButton::Secondary) {
-                            info!(span_id = id, interact_rect=%interact_rect, "Right clicked");
-                        }
-                        let visuals = ui.style().interact(&interact);
-                        // adapted from `egui::containers::collapsing_header::paint_default_icon`
-                        let rect = Rect::from_center_size(icon_rect.center(), size * 0.5);
-                        let rect = rect.expand(visuals.expansion);
-                        let mut points =
-                            vec![rect.left_top(), rect.right_top(), rect.center_bottom()];
-                        if !is_open {
-                            let rotation = egui::emath::Rot2::from_angle(PI * 1.5);
-                            for p in &mut points {
-                                *p = rect.center() + rotation * (*p - rect.center());
-                            }
-                        }
-                        ui.painter().add(Shape::convex_polygon(
-                            points,
-                            visuals.fg_stroke.color,
-                            Stroke::NONE,
-                        ));
-                        if let Some(LocatingState::Highlight(target)) =
-                            ctx.locating_state.as_deref()
-                            && target == id
-                        {
-                            let highlight_rect_min = icon_rect.min - ui.spacing().item_spacing;
-                            let highlight_rect_max =
-                                label_resp.rect.max + ui.spacing().item_spacing;
-                            let highlight_rect = rect!(highlight_rect_min, highlight_rect_max);
-                            let interact = ui.style().noninteractive();
-                            ui.painter().add(RectShape::filled(
-                                highlight_rect,
-                                interact.corner_radius,
-                                interact.bg_fill.gamma_multiply_u8(30),
-                            ));
-                            ui.painter().add(RectShape::stroke(
-                                highlight_rect,
-                                interact.corner_radius,
-                                interact.bg_stroke,
-                                egui::StrokeKind::Middle,
-                            ));
-                        }
-
-                        // hover effect
-                        if interact.hovered() {
-                            let color = Color32::GRAY.gamma_multiply_u8(24);
-                            ui.painter().add(Shape::rect_filled(interact_rect, 0, color));
-                        }
-                        if let Some(ref mut q) = ctx.locating_state
-                            && let LocatingState::ScrollTo { target, .. } = &**q
-                            && *target == *id
-                        {
-                            ui.scroll_to_rect(label_resp.rect, None);
-                            info!(target, rect = %label_resp.rect, "Reached target");
-                            **q = LocatingState::Highlight(*id);
-                        };
-                    });
-                }
-                Row::MetaHeader(id) => {
-                    let is_open = ctx.meta_open_writer.get(*id as usize).unwrap_or(false);
-                    ui.horizontal(|ui| {
-                        let i_size = vec2(ui.spacing().icon_width, ui.spacing().icon_width);
-                        let available_rect = ui.available_rect_before_wrap();
-                        let (_icon_id, icon_rect) = ui.allocate_space(i_size);
-                        let ui_header = egui::Label::new("META").sense(Sense::hover());
-
-                        let label_resp = ui.add(ui_header);
-                        let interact_id = ui.id().with("meta_toggle").with(id);
-                        let interact_rect =
-                            label_resp.rect.with_min_x(0.0).with_max_x(available_rect.max.x);
-                        let interact = ui.interact(interact_rect, interact_id, Sense::click());
-                        if interact.clicked() {
-                            ctx.meta_open_writer.toggle(*id as usize);
-                            invalidate = true;
-                        }
-                        let visuals = ui.style().interact(&interact);
-
-                        // adapted from `egui::containers::collapsing_header::paint_default_icon`
-                        let rect = Rect::from_center_size(icon_rect.center(), i_size * 0.5);
-                        let rect = rect.expand(visuals.expansion);
-                        let mut points =
-                            vec![rect.left_top(), rect.right_top(), rect.center_bottom()];
-                        if !is_open {
-                            let rotation = egui::emath::Rot2::from_angle(PI * 1.5);
-                            for p in &mut points {
-                                *p = rect.center() + rotation * (*p - rect.center());
-                            }
-                        }
-                        ui.painter().add(Shape::convex_polygon(
-                            points,
-                            visuals.fg_stroke.color,
-                            Stroke::NONE,
-                        ));
-                        if interact.hovered() {
-                            let color = Color32::GRAY.gamma_multiply_u8(24);
-                            ui.painter().add(Shape::rect_filled(interact_rect, 0, color));
-                        }
-                    });
-                }
-                Row::Text(x) | Row::Attr(x) => {
-                    ui.add(egui::Label::new(x).wrap_mode(egui::TextWrapMode::Extend));
-                }
-                Row::Err(x) => {
-                    ui.label(x);
-                }
+            .scope_builder(UiBuilder::new().max_rect(padded_rect), |ui| {
+                render_row(ui, row, &mut invalidate, &mut ctx)
             })
             .response;
         // indent line
@@ -374,5 +223,143 @@ pub fn tree_view<'t, 'o, 'l>(
     }
     if invalidate {
         tree.invalidate();
+    }
+}
+fn render_row<'t, 'o, 'l>(
+    ui: &mut Ui, row: &Row, invalidate: &mut bool, ctx: &mut TreeContextMut<'t, 'o, 'l>,
+) {
+    match row {
+        Row::SpanHeader(id) => {
+            let header = match ctx.log_reader.header(*id) {
+                Ok(header) => header,
+                Err(y) => {
+                    let f = display_error_context(&y);
+                    ui.label(format!("Failed to get header for {id}: {f}"));
+                    return;
+                }
+            };
+
+            let level_repr = header.level.repr(ui.ctx().theme());
+            let header_text_orig = if let Some(message) = header.message {
+                format!("{}: {}", level_repr.0, message)
+            } else if *id == 0 {
+                "root".to_string()
+            } else {
+                header.name.into()
+            };
+            let header_text = if let Some(nl) = memchr::memchr(b'\n', header_text_orig.as_bytes()) {
+                format!("{}...", &header_text_orig[..nl])
+            } else {
+                header_text_orig.clone()
+            };
+
+            let is_open = ctx.open_writer.get(*id as usize).unwrap_or(false);
+            let size = vec2(ui.spacing().icon_width, ui.spacing().icon_width);
+            ui.horizontal(|ui| {
+                let available_rect = ui.available_rect_before_wrap();
+                let (_icon_id, icon_rect) = ui.allocate_space(size);
+                let ui_header =
+                    egui::Label::new(RichText::new(header_text).background_color(level_repr.1))
+                        .sense(Sense::hover());
+                let label_resp = ui.add(ui_header);
+                let interact_id = ui.id().with(id);
+                let interact_rect =
+                    label_resp.rect.with_min_x(0.0).with_max_x(available_rect.max.x);
+                let interact = ui.interact(interact_rect, interact_id, Sense::click());
+                if interact.clicked() {
+                    ctx.open_writer.toggle(*id as usize);
+                    *invalidate = true;
+                }
+                if interact.clicked_by(egui::PointerButton::Secondary) {
+                    info!(span_id = id, interact_rect=%interact_rect, "Right clicked");
+                }
+                let visuals = ui.style().interact(&interact);
+                // adapted from `egui::containers::collapsing_header::paint_default_icon`
+                let rect = Rect::from_center_size(icon_rect.center(), size * 0.5);
+                let rect = rect.expand(visuals.expansion);
+                let mut points = vec![rect.left_top(), rect.right_top(), rect.center_bottom()];
+                if !is_open {
+                    let rotation = egui::emath::Rot2::from_angle(PI * 1.5);
+                    for p in &mut points {
+                        *p = rect.center() + rotation * (*p - rect.center());
+                    }
+                }
+                ui.painter().add(Shape::convex_polygon(
+                    points,
+                    visuals.fg_stroke.color,
+                    Stroke::NONE,
+                ));
+                if let Some(LocatingState::Highlight(target)) = ctx.locating_state.as_deref()
+                    && target == id
+                {
+                    let highlight_rect_min = icon_rect.min - ui.spacing().item_spacing;
+                    let highlight_rect_max = label_resp.rect.max + ui.spacing().item_spacing;
+                    let highlight_rect = rect!(highlight_rect_min, highlight_rect_max);
+                    let interact = ui.style().noninteractive();
+                    let (radius, bg_fill, bg_stroke) =
+                        (interact.corner_radius, interact.bg_fill, interact.bg_stroke);
+                    ui.painter().rect_filled(highlight_rect, radius, bg_fill.gamma_multiply_u8(30));
+                    ui.painter().rect_stroke(highlight_rect, radius, bg_stroke, StrokeKind::Middle);
+                }
+
+                // hover effect
+                if interact.hovered() {
+                    ui.painter().rect_filled(interact_rect, 0, Color32::GRAY.gamma_multiply_u8(24));
+                }
+                if let Some(ref mut state) = ctx.locating_state
+                    && let LocatingState::ScrollTo { target, .. } = &**state
+                    && *target == *id
+                {
+                    ui.scroll_to_rect(label_resp.rect, None);
+                    info!(target, rect = %label_resp.rect, "Reached target");
+                    **state = LocatingState::Highlight(*id);
+                };
+            });
+        }
+        Row::MetaHeader(id) => {
+            let is_open = ctx.meta_open_writer.get(*id as usize).unwrap_or(false);
+            ui.horizontal(|ui| {
+                let i_size = vec2(ui.spacing().icon_width, ui.spacing().icon_width);
+                let available_rect = ui.available_rect_before_wrap();
+                let (_icon_id, icon_rect) = ui.allocate_space(i_size);
+                let ui_header = egui::Label::new("META").sense(Sense::hover());
+
+                let label_resp = ui.add(ui_header);
+                let interact_id = ui.id().with("meta_toggle").with(id);
+                let interact_rect =
+                    label_resp.rect.with_min_x(0.0).with_max_x(available_rect.max.x);
+                let interact = ui.interact(interact_rect, interact_id, Sense::click());
+                if interact.clicked() {
+                    ctx.meta_open_writer.toggle(*id as usize);
+                    *invalidate = true;
+                }
+                let visuals = ui.style().interact(&interact);
+
+                // adapted from `egui::containers::collapsing_header::paint_default_icon`
+                let rect = Rect::from_center_size(icon_rect.center(), i_size * 0.5);
+                let rect = rect.expand(visuals.expansion);
+                let mut points = vec![rect.left_top(), rect.right_top(), rect.center_bottom()];
+                if !is_open {
+                    let rotation = egui::emath::Rot2::from_angle(PI * 1.5);
+                    for p in &mut points {
+                        *p = rect.center() + rotation * (*p - rect.center());
+                    }
+                }
+                ui.painter().add(Shape::convex_polygon(
+                    points,
+                    visuals.fg_stroke.color,
+                    Stroke::NONE,
+                ));
+                if interact.hovered() {
+                    ui.painter().rect_filled(interact_rect, 0, Color32::GRAY.gamma_multiply_u8(24));
+                }
+            });
+        }
+        Row::Text(x) | Row::Attr(x) => {
+            ui.add(egui::Label::new(x).wrap_mode(egui::TextWrapMode::Extend));
+        }
+        Row::Err(x) => {
+            ui.label(x);
+        }
     }
 }

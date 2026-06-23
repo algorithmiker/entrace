@@ -1,0 +1,10 @@
+[package]
+name = "entrace_convert"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+entrace_core = { version = "0.2.0", path = "../entrace_core/" }
+clap = { version = "4.6.1", features = ["derive"] }
+anyhow = "1.0.102"
+fs-err = "3.3.0"

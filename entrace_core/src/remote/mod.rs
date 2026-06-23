@@ -85,10 +85,17 @@ impl LogProvider for BaseIETLogProvider {
         Ok(self.data_get(idx)?.parent)
     }
 
-    fn attrs(&'_ self, idx: u32) -> LogProviderResult<Vec<(&'_ str, EnValueRef<'_>)>> {
-        // HACK: maybe this should return an iterator instead
-        // not high priority since attrs are only displayed on demand
-        Ok(self.data_get(idx)?.attributes.iter().map(|(x, y)| (x.as_str(), y.as_ref())).collect())
+    fn attr_names(&'_ self, idx: u32) -> LogProviderResult<Vec<&'_ str>> {
+        Ok(self.data_get(idx)?.attr_names.iter().map(|x| x.as_str()).collect())
+    }
+
+    fn attr_values(&'_ self, idx: u32) -> LogProviderResult<Vec<EnValueRef<'_>>> {
+        Ok(self.data_get(idx)?.attr_values.iter().map(|x| x.as_ref()).collect())
+    }
+
+    fn attr_value(&self, x: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>> {
+        let entry = self.data_get(x)?;
+        Ok(entry.as_ref().get_attr(name))
     }
 
     fn header(&'_ self, idx: u32) -> LogProviderResult<Header<'_>> {

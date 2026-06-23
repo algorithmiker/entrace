@@ -31,11 +31,21 @@ pub type LogProviderResult<T> = Result<T, LogProviderError>;
 ///
 /// Get one with [crate::load_trace] or [crate::remote::RemoteLogProvider].
 pub trait LogProvider {
-    fn children(&self, x: u32) -> Result<&[u32], LogProviderError>;
-    fn parent(&self, x: u32) -> Result<u32, LogProviderError>;
-    fn attrs(&'_ self, x: u32) -> Result<Vec<(&'_ str, EnValueRef<'_>)>, LogProviderError>;
-    fn header(&'_ self, x: u32) -> Result<Header<'_>, LogProviderError>;
-    fn meta(&'_ self, x: u32) -> Result<MetadataRefContainer<'_>, LogProviderError>;
+    fn children(&self, x: u32) -> LogProviderResult<&[u32]>;
+    fn parent(&self, x: u32) -> LogProviderResult<u32>;
+
+    fn attr_names(&'_ self, x: u32) -> LogProviderResult<Vec<&'_ str>>;
+    fn attr_values(&'_ self, x: u32) -> LogProviderResult<Vec<EnValueRef<'_>>>;
+    /// Equivalent to a search on attr_names/attr_values, but might be faster depending on the
+    /// implementation.
+    fn attr_value(&self, x: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>> {
+        let attr_names = self.attr_names(x)?;
+        let attr_values = self.attr_values(x)?;
+        Ok(attr_names.iter().position(|&k| k == name).map(|i| attr_values[i].clone()))
+    }
+
+    fn header(&'_ self, x: u32) -> LogProviderResult<Header<'_>>;
+    fn meta(&'_ self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>>;
 
     /// The total amount of messages in this provider.
     /// This MUST be cheap as the frontend might call this every frame.
@@ -49,7 +59,7 @@ pub trait LogProvider {
     fn frame_callback(&mut self) {}
 
     /// Equivalent to header.message, but some implementations might offer a fast path for this.
-    fn message(&'_ self, x: u32) -> Result<Option<&'_ str>, LogProviderError> {
+    fn message(&'_ self, x: u32) -> LogProviderResult<Option<&'_ str>> {
         Ok(self.header(x)?.message)
     }
 }
@@ -63,7 +73,7 @@ pub enum LogProviderImpl {
 }
 
 impl LogProvider for LogProviderImpl {
-    fn children(&self, x: u32) -> Result<&[u32], LogProviderError> {
+    fn children(&self, x: u32) -> LogProviderResult<&[u32]> {
         match self {
             #[cfg(feature = "mmap")]
             Self::Mmap(inner) => inner.children(x),
@@ -73,7 +83,7 @@ impl LogProvider for LogProviderImpl {
         }
     }
 
-    fn parent(&self, x: u32) -> Result<u32, LogProviderError> {
+    fn parent(&self, x: u32) -> LogProviderResult<u32> {
         match self {
             #[cfg(feature = "mmap")]
             Self::Mmap(inner) => inner.parent(x),
@@ -83,17 +93,37 @@ impl LogProvider for LogProviderImpl {
         }
     }
 
-    fn attrs(&'_ self, x: u32) -> Result<Vec<(&'_ str, EnValueRef<'_>)>, LogProviderError> {
+    fn attr_names(&self, x: u32) -> LogProviderResult<Vec<&'_ str>> {
         match self {
             #[cfg(feature = "mmap")]
-            Self::Mmap(inner) => inner.attrs(x),
-            Self::BaseIET(inner) => inner.attrs(x),
-            Self::FileIET(inner) => inner.attrs(x),
-            Self::Remote(inner) => inner.attrs(x),
+            Self::Mmap(inner) => inner.attr_names(x),
+            Self::BaseIET(inner) => inner.attr_names(x),
+            Self::FileIET(inner) => inner.attr_names(x),
+            Self::Remote(inner) => inner.attr_names(x),
         }
     }
 
-    fn header(&'_ self, x: u32) -> Result<Header<'_>, LogProviderError> {
+    fn attr_values(&self, x: u32) -> LogProviderResult<Vec<EnValueRef<'_>>> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.attr_values(x),
+            Self::BaseIET(inner) => inner.attr_values(x),
+            Self::FileIET(inner) => inner.attr_values(x),
+            Self::Remote(inner) => inner.attr_values(x),
+        }
+    }
+
+    fn attr_value(&self, x: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>> {
+        match self {
+            #[cfg(feature = "mmap")]
+            Self::Mmap(inner) => inner.attr_value(x, name),
+            Self::BaseIET(inner) => inner.attr_value(x, name),
+            Self::FileIET(inner) => inner.attr_value(x, name),
+            Self::Remote(inner) => inner.attr_value(x, name),
+        }
+    }
+
+    fn header(&'_ self, x: u32) -> LogProviderResult<Header<'_>> {
         match self {
             #[cfg(feature = "mmap")]
             Self::Mmap(inner) => inner.header(x),
@@ -102,7 +132,7 @@ impl LogProvider for LogProviderImpl {
             Self::Remote(inner) => inner.header(x),
         }
     }
-    fn message(&'_ self, x: u32) -> Result<Option<&str>, LogProviderError> {
+    fn message(&'_ self, x: u32) -> LogProviderResult<Option<&str>> {
         match self {
             #[cfg(feature = "mmap")]
             Self::Mmap(inner) => inner.message(x),
@@ -112,7 +142,7 @@ impl LogProvider for LogProviderImpl {
         }
     }
 
-    fn meta(&'_ self, x: u32) -> Result<MetadataRefContainer<'_>, LogProviderError> {
+    fn meta(&'_ self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
         match self {
             #[cfg(feature = "mmap")]
             Self::Mmap(inner) => inner.meta(x),

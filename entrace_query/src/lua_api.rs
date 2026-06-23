@@ -25,7 +25,7 @@ use roaring::RoaringBitmap;
 use crate::{
     QueryError,
     filtersets::{Filterset, Matcher, Predicate, PredicateId},
-    lua_value::{LuaValueRef, LuaValueRefRef},
+    lua_value::LuaValueRefRef,
 };
 fn level_to_u8(level: &entrace_core::LevelContainer) -> u8 {
     match level {
@@ -159,10 +159,11 @@ pub fn en_metadata_module_path(
 #[doc = include_str!("../api-docs/en_attrs.md")]
 pub fn en_attrs(tcc: &impl LogProvider, lua: &Lua) -> impl Fn(u32) -> mlua::Result<Table> {
     move |id: u32| {
-        let c = tcc.attrs(id).map_err(to_lua_err)?;
-        let table = lua.create_table_with_capacity(0, c.len())?;
-        for (key, value) in c {
-            table.set(key, LuaValueRef(value))?;
+        let attr_names = tcc.attr_names(id).map_err(to_lua_err)?;
+        let attr_values = tcc.attr_values(id).map_err(to_lua_err)?;
+        let table = lua.create_table_with_capacity(0, attr_names.len())?;
+        for (&key, value) in attr_names.iter().zip(attr_values.iter()) {
+            table.set(key, LuaValueRefRef(value))?;
         }
         Ok(table)
     }
@@ -173,9 +174,9 @@ pub fn en_attr_names(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn(u32) -> mlua::Result<Vec<mlua::Value>> {
     move |id: u32| {
-        let c = tcc.attrs(id).map_err(to_lua_err)?;
+        let c = tcc.attr_names(id).map_err(to_lua_err)?;
         let mut names = Vec::with_capacity(c.len());
-        for (key, _) in c {
+        for key in c {
             names.push(key.into_lua(lua)?);
         }
         Ok(names)
@@ -187,22 +188,28 @@ pub fn en_attr_values(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn(u32) -> mlua::Result<Vec<mlua::Value>> {
     move |id: u32| {
-        let c = tcc.attrs(id).map_err(to_lua_err)?;
-        let mut values = Vec::with_capacity(c.len());
-        for (_, value) in c {
-            values.push(LuaValueRef(value).into_lua(lua)?);
+        let attr_values = tcc.attr_values(id).map_err(to_lua_err)?;
+        let mut values = Vec::with_capacity(attr_values.len());
+        for value in attr_values.iter() {
+            values.push(LuaValueRefRef(value).into_lua(lua)?);
         }
         Ok(values)
     }
 }
 
 #[doc = include_str!("../api-docs/en_attr_by_idx.md")]
+// TODO: this should probably be changed to only return the value?
 pub fn en_attr_by_idx(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, usize)) -> mlua::Result<(mlua::String, mlua::Value)> {
     move |(id, idx): (u32, usize)| {
-        let c = tcc.attrs(id).map_err(to_lua_err)?;
-        let (k, v) = c.get(idx).ok_or_else(|| make_oob_error(idx as u32, c.len()))?;
+        let attr_names = tcc.attr_names(id).map_err(to_lua_err)?;
+        let attr_values = tcc.attr_values(id).map_err(to_lua_err)?;
+        let (k, v) = attr_names
+            .iter()
+            .zip(attr_values.iter())
+            .nth(idx)
+            .ok_or_else(|| make_oob_error(idx as u32, attr_names.len()))?;
         Ok((lua.create_string(k)?, LuaValueRefRef(v).into_lua(lua)?))
     }
 }
@@ -212,9 +219,8 @@ pub fn en_attr_by_name(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, String)) -> mlua::Result<mlua::Value> {
     move |(id, key): (u32, String)| {
-        let attrs = tcc.attrs(id).map_err(to_lua_err)?;
-        let attr = attrs.iter().find(|(k, _)| *k == key);
-        if let Some(attr) = attr { LuaValueRefRef(&attr.1).into_lua(lua) } else { Ok(mlua::Nil) }
+        let value = tcc.attr_value(id, &key).map_err(to_lua_err)?;
+        if let Some(attr) = value { LuaValueRefRef(&attr).into_lua(lua) } else { Ok(mlua::Nil) }
     }
 }
 
@@ -223,8 +229,8 @@ pub fn en_attr_name(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, usize)) -> mlua::Result<mlua::String> {
     move |(id, idx): (u32, usize)| {
-        let c = tcc.attrs(id).map_err(to_lua_err)?;
-        let (k, _) = c.get(idx).ok_or_else(|| make_oob_error(idx as u32, c.len()))?;
+        let names = tcc.attr_names(id).map_err(to_lua_err)?;
+        let k = names.get(idx).ok_or_else(|| make_oob_error(idx as u32, names.len()))?;
         lua.create_string(k)
     }
 }
@@ -234,8 +240,8 @@ pub fn en_attr_value(
     tcc: &impl LogProvider, lua: &Lua,
 ) -> impl Fn((u32, usize)) -> mlua::Result<mlua::Value> {
     move |(id, idx): (u32, usize)| {
-        let c = tcc.attrs(id).map_err(to_lua_err)?;
-        let (_, v) = c.get(idx).ok_or_else(|| make_oob_error(idx as u32, c.len()))?;
+        let values = tcc.attr_values(id).map_err(to_lua_err)?;
+        let v = values.get(idx).ok_or_else(|| make_oob_error(idx as u32, values.len()))?;
         LuaValueRefRef(v).into_lua(lua)
     }
 }
@@ -243,7 +249,9 @@ pub fn en_attr_value(
 #[doc = include_str!("../api-docs/en_as_string.md")]
 pub fn en_as_string(tcc: &impl LogProvider) -> impl Fn(u32) -> LogProviderResult<String> {
     move |id: u32| {
-        let attrs = tcc.attrs(id)?;
+        let attr_names = tcc.attr_names(id)?;
+        let attr_values = tcc.attr_values(id)?;
+        let attrs: Vec<(&str, EnValueRef)> = attr_names.into_iter().zip(attr_values).collect();
         let meta = tcc.meta(id)?;
         let children = tcc.children(id)?;
 
@@ -266,15 +274,14 @@ pub fn en_contains_anywhere(
 ) -> impl FnMut((u32, String)) -> LogProviderResult<bool> {
     move |(id, needle): (u32, String)| {
         let mut finder_w = finder_cache.borrow_mut();
-        let finder = if let Some(q) = finder_w.get(&needle) {
-            q
-        } else {
-            finder_w.insert(needle.clone(), memchr::memmem::Finder::new(&needle).into_owned());
-            finder_w.get(&needle).unwrap()
-        };
+        let finder = finder_w
+            .entry(needle.clone())
+            .or_insert_with(|| memchr::memmem::Finder::new(&needle).into_owned());
         let mut buf = buffer.borrow_mut();
         buf.clear();
-        let attrs = tcc.attrs(id)?;
+        let attr_names = tcc.attr_names(id)?;
+        let attr_values = tcc.attr_values(id)?;
+        let attrs: Vec<(&str, EnValueRef)> = attr_names.into_iter().zip(attr_values).collect();
         let meta = tcc.meta(id)?;
         let children = tcc.children(id)?;
         #[derive(Debug)]
@@ -296,7 +303,7 @@ pub fn en_contains_anywhere(
 pub fn en_foreach(
     _lua: &Lua, range: &RangeInclusive<u32>, f: mlua::Function,
 ) -> mlua::Result<Vec<u32>> {
-    let mut results: Vec<u32> = Vec::new();
+    let mut results: Vec<u32> = vec![];
     for i in range.clone() {
         let res = f.call::<mlua::Value>(i)?;
         match res {
@@ -423,11 +430,11 @@ pub fn span_matches_filter(
         {
             return tcc.message(id).unwrap().is_some_and(|v| v.cmp(expected) == relation);
         }
-        let attrs = tcc.attrs(id).unwrap();
-        let Some((_name, target_here)) = attrs.iter().find(|(name, _)| *name == target) else {
+        let Some(value_here) = tcc.attr_value(id, target).unwrap() else {
             return false;
         };
-        values_match(relation, target_here, en_value)
+
+        values_match(relation, &value_here, en_value)
     }
 }
 
