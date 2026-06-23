@@ -175,3 +175,110 @@ pub fn et_to_iet<W: Write, R: Read + Seek>(
     std::io::copy(inp, out).map_err(OutWriteError)?;
     Ok(())
 }
+
+// Old trace entry, from version 1
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct TraceEntry1 {
+    pub parent: u32,
+    pub message: Option<String>,
+    pub metadata: MetadataContainer,
+    pub attributes: Vec<(String, EnValue)>,
+}
+
+impl TraceEntry1 {
+    pub fn into_trace_entry_2(self) -> TraceEntry {
+        let TraceEntry1 { parent, message, metadata, mut attributes } = self;
+        attributes.sort_unstable_by(|x, y| x.0.cmp(&y.0));
+        let (attr_names, attr_values) = attributes.into_iter().unzip();
+
+        TraceEntry::from_sorted_attrs(parent, message, metadata, attr_names, attr_values)
+    }
+}
+/// Convert a version 1 et file to a version 2 (latest as of writing) format.
+/// It is the caller's responsibility to buffer IO, but temp SHOULD not be buffered
+/// (it'll be buffered internally, separately for read/write).
+///
+/// Temp MUST be an EMPTY scratch buffer (eg. a temp file)
+/// If [skip_validating_magic] is set, it will not try to parse the magic, and assume you've already validated
+/// this is an ET-v1 file.
+pub fn et_v1_to_v2<W: Write, R: Read + Seek, RW: Read + Write + Seek>(
+    inp: &mut R, out: &mut W, temp: &mut RW, skip_validating_magic: bool,
+) -> Result<(), ConvertError> {
+    use ConvertError::*;
+    use bincode::serde::{decode_from_std_read, encode_into_std_write};
+    const CFG: Configuration = bincode::config::standard();
+
+    if !skip_validating_magic {
+        let mut input_magic = [0; 10];
+        inp.read_exact(&mut input_magic).map_err(ReadInputError)?;
+        let (version, ty) = parse_entrace_magic(&input_magic)?;
+        if version != 1 {
+            return Err(ConvertError::InputVersionMismatch(version, 1));
+        } else if ty != StorageFormat::ET {
+            return Err(ConvertError::InputFormatMismatch(ty, StorageFormat::ET));
+        }
+    }
+
+    let _inp_offsets: Vec<u64> = decode_from_std_read(inp, CFG)?;
+    let child_lists: Vec<PoolEntry> = decode_from_std_read(inp, CFG)?;
+
+    let mut temp_writer = BufWriter::new(temp);
+    let mut new_offsets = vec![];
+    for _processed in 0..child_lists.len() {
+        let offset = temp_writer.stream_position().map_err(ReadInputError)?;
+        new_offsets.push(offset);
+
+        let entry1: TraceEntry1 = decode_from_std_read(inp, CFG)?;
+        encode_into_std_write(entry1.into_trace_entry_2(), &mut temp_writer, CFG)?;
+    }
+    temp_writer.seek(std::io::SeekFrom::Start(0)).map_err(TempWriteError)?;
+    let temp = temp_writer.into_inner().map_err(|x| TempWriteError(x.into_error()))?; // this will flush too
+
+    let out_magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::ET);
+    out.write_all(&out_magic).map_err(OutWriteError)?;
+    encode_into_std_write(new_offsets, out, CFG)?;
+    encode_into_std_write(child_lists, out, CFG)?;
+    let mut temp_reader = BufReader::new(temp);
+    std::io::copy(&mut temp_reader, out).map_err(OutWriteError)?;
+
+    Ok(())
+}
+
+/// Convert a version 1 iet file to a version 2 (latest as of writing) format.
+/// It is the caller's responsibility to buffer IO.
+pub fn iet_v1_to_v2<W: Write, R: Read + Seek>(
+    inp: &mut R, out: &mut W,
+) -> Result<(), ConvertError> {
+    use ConvertError::*;
+    use bincode::serde::{decode_from_std_read, encode_into_std_write};
+    const CFG: Configuration = bincode::config::standard();
+
+    let mut input_magic = [0; 10];
+    inp.read_exact(&mut input_magic).map_err(ReadInputError)?;
+    let (version, ty) = parse_entrace_magic(&input_magic)?;
+    if version != 1 {
+        return Err(ConvertError::InputVersionMismatch(version, 1));
+    } else if ty != StorageFormat::ET {
+        return Err(ConvertError::InputFormatMismatch(ty, StorageFormat::IET));
+    }
+
+    let out_magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::ET);
+    out.write_all(&out_magic).map_err(OutWriteError)?;
+
+    loop {
+        let decoded: Result<TraceEntry1, _> = decode_from_std_read(inp, CFG);
+        match decoded {
+            Ok(x) => encode_into_std_write(x.into_trace_entry_2(), out, CFG)?,
+            Err(y) => match y {
+                bincode::error::DecodeError::Io { inner, .. }
+                    if inner.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    break;
+                }
+                _ => return Err(ConvertError::DecodeError(y)),
+            },
+        };
+    }
+
+    Ok(())
+}
