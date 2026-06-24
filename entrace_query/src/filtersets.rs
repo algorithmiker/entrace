@@ -1,5 +1,5 @@
+use croaring::Bitmap as Roaring;
 use itertools::Itertools;
-use roaring::{MultiOps, RoaringBitmap as Roaring};
 use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::{
@@ -69,10 +69,12 @@ pub struct Evaluator<T> {
     pool: Vec<Filterset>,
     pub predicates: Vec<Predicate<T>>,
     pub results: HashMap<FiltersetId, Roaring>,
+    /// needed for not to function correctly
+    pub nitems: u32,
 }
 impl<T> Evaluator<T> {
-    pub fn new() -> Self {
-        Self { pool: vec![], predicates: vec![], results: HashMap::new() }
+    pub fn new(nitems: u32) -> Self {
+        Self { pool: vec![], predicates: vec![], results: HashMap::new(), nitems }
     }
     pub fn is_and(&self, id: FiltersetId) -> bool {
         matches!(self.pool[id], Filterset::And(_))
@@ -447,26 +449,31 @@ impl<T> Evaluator<T> {
                     let source_result = &self.results[src];
                     self.results.insert(node, source_result.clone());
                 }
+                // TODO: maybe we could speed this up?
                 Filterset::And(items) => {
-                    self.results.insert(node, items.iter().map(|x| &self.results[x]).union());
+                    let mut it = items.iter().map(|x| &self.results[x]);
+                    let Some(mut r) = it.next().cloned() else { continue };
+                    for x in it {
+                        r.and_inplace(x)
+                    }
+                    self.results.insert(node, r);
                 }
                 Filterset::Or(items) => {
-                    self.results.insert(node, items.iter().map(|x| &self.results[x]).union());
+                    let mut it = items.iter().map(|x| &self.results[x]);
+                    let Some(mut r) = it.next().cloned() else { continue };
+                    for x in it {
+                        r.or_inplace(x)
+                    }
+                    self.results.insert(node, r);
                 }
                 Filterset::Not(src) => {
                     let source_result = &self.results[src];
-                    // TODO: I didn't find a flip operation on RoaringBitmap, there isn't one in
-                    // roaring-rs, but there is one in croaring. Investigate the performance of
-                    // switching to croaring.
-                    // WARN: this is a bug: since we don't know the data len, this *will* include
-                    // records beyond the actual record count.
-                    self.results.insert(node, Roaring::full() - source_result);
+                    self.results.insert(node, source_result.flip(0..self.nitems));
                 }
                 Filterset::RelDnf(items, src) => {
-                    let source_result = &self.results[src];
                     let this_result = matcher.subset_matching_dnf(
                         items.iter().map(|x| x.iter().map(|y| &self.predicates[*y])),
-                        source_result,
+                        &self.results[src],
                     );
 
                     self.results.insert(node, this_result);
@@ -503,11 +510,6 @@ impl<T: Debug> Evaluator<T> {
     }
 }
 
-impl<T> Default for Evaluator<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 pub trait Matcher<T> {
     /// Note: for good performance, you SHOULD implement [Matcher::subset_matching_dnf], as the default
     /// implementation calls this a lot, generating lots of slow scans.
@@ -518,7 +520,19 @@ pub trait Matcher<T> {
         I: Iterator<Item = &'a Predicate<T>>,
         T: 'a,
     {
-        predicates.map(|x| x.map(|y| self.subset_matching(y, input)).intersection()).union()
+        let mut res = Roaring::new();
+        for ord_clause in predicates {
+            let mut inner_intersection = None;
+            for anded_clause in ord_clause {
+                let next = self.subset_matching(anded_clause, input);
+                match inner_intersection {
+                    None => inner_intersection = Some(next),
+                    Some(r) => inner_intersection = Some(r.and(&next)),
+                }
+            }
+            res.or_inplace(&inner_intersection.unwrap_or(Roaring::new()));
+        }
+        res
     }
 }
 pub struct YesManMatcher();

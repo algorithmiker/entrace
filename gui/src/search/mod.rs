@@ -6,7 +6,6 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     fmt::Debug,
-    num::NonZero,
     ops::{Deref, RangeInclusive},
     rc::Rc,
     sync::{Arc, RwLock},
@@ -79,9 +78,9 @@ pub struct QuerySettings {
 impl QuerySettings {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let num_cpus =
-            std::thread::available_parallelism().unwrap_or_else(|_| NonZero::new(2).unwrap());
-        let num_cpus = num_cpus.get() as u8;
+        let num_cpus = std::thread::available_parallelism()
+            .unwrap_or_else(|_| 2.try_into().unwrap())
+            .get() as u8;
         QuerySettings { num_threads: num_cpus, data: QuerySettingsDialogData::Closed }
     }
     pub fn is_open(&self) -> bool {
@@ -237,8 +236,8 @@ fn lua_result_to_ids(
         if let Ok(s) = table.get::<String>("type")
             && s == "filterset"
         {
-            let mut evaluator =
-                lua_api::construct_evaluator(&table).map_err(QueryError::FiltersetEvalFail)?;
+            let mut evaluator = lua_api::construct_evaluator(&table, log.len() as u32)
+                .map_err(QueryError::FiltersetEvalFail)?;
             let root: usize = table.get("root").map_err(QueryError::FiltersetEvalFail)?;
             evaluator.normalize(root);
             let matcher = EnMatcher { log };

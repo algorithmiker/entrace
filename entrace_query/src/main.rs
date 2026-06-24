@@ -1,14 +1,14 @@
 use std::{cmp::Ordering, collections::HashSet};
 
+use croaring::Bitmap as Roaring;
 use entrace_core::EnValue;
 use entrace_query::filtersets::{Evaluator, Filterset, Predicate};
-use roaring::RoaringBitmap as Roaring;
 fn main() {
     // Motivating example: filter people with (180<height<195 and 75<weight<90) or (iq == 120)
-    let mut evaluator = Evaluator::<EnValue>::new();
+    let mut evaluator = Evaluator::<EnValue>::new(100);
     use EnValue::*;
     use Ordering::*;
-    let src = evaluator.new_filterset(Filterset::Primitive(Roaring::full()));
+    let src = evaluator.new_filterset(Filterset::Primitive(Roaring::from_range(0..=99)));
     let height_lower =
         evaluator.new_dnf(vec![vec![Predicate::new("height", Greater, U64(180))]], src);
     let height_upper = evaluator.new_dnf(vec![vec![Predicate::new("height", Less, U64(195))]], src);

@@ -13,20 +13,19 @@ use std::{
     time::Instant,
 };
 
-use anyhow::bail;
-use entrace_core::{
-    EnValue, EnValueRef, LevelContainer, LogProvider, LogProviderError, LogProviderImpl,
-    LogProviderResult, MetadataRefContainer,
-};
-use memchr::memmem::Finder;
-use mlua::{ExternalError, ExternalResult, IntoLua, Lua, MultiValue, Table, Value};
-use roaring::RoaringBitmap;
-
 use crate::{
     QueryError,
     filtersets::{Filterset, Matcher, Predicate, PredicateId},
     lua_value::LuaValueRefRef,
 };
+use anyhow::bail;
+use croaring::Bitmap as Roaring;
+use entrace_core::{
+    EnValue, EnValueRef, LevelContainer, LogProvider, LogProviderError, LogProviderImpl,
+    LogProviderResult, MetadataRefContainer,
+};
+use memchr::memmem::Finder;
+use mlua::{ExternalError, IntoLua, Lua, MultiValue, Table, Value};
 fn level_to_u8(level: &entrace_core::LevelContainer) -> u8 {
     match level {
         LevelContainer::Trace => 1,
@@ -733,10 +732,13 @@ pub fn en_filterset_not(lua: &Lua, filterset: Table) -> mlua::Result<Table> {
     let not = lua.create_table()?;
     not.set("type", "invert")?;
     let new_items: Table = new_fs.get("items")?;
-    not.set("src", new_fs.len()? - 1)?;
+    not.set("src", new_items.len()? - 1)?;
     new_items.push(not)?;
     new_fs.set("root", new_items.len()? - 1)?;
     Ok(new_fs)
+    TODO: en_filterset_not(en_filter("breadth", "EQ", 1000, en_filterset_from_range(en_span_range())))
+    this will return MORE spans than there are in 1GB.et. try to fix.
+
 }
 
 /// Creates a Predicate from a Table that has keys "target", "relation", "value"
@@ -770,13 +772,12 @@ fn item_to_filterset(
     match ty.as_str() {
         "prim_list" => {
             let value: Vec<u32> = item.get("value")?;
-            Ok(Filterset::Primitive(RoaringBitmap::from_iter(value)))
+            Ok(Filterset::Primitive(Roaring::from_iter(value)))
         }
         "prim_range" => {
             let start: u32 = item.get("start")?;
             let end: u32 = item.get("end")?;
-            let bm = RoaringBitmap::from_sorted_iter(start..=end).into_lua_err()?;
-            Ok(Filterset::Primitive(bm))
+            Ok(Filterset::Primitive(Roaring::from_range(start..=end)))
         }
         "rel_dnf" => {
             //     { type = "rel_dnf",
@@ -834,12 +835,10 @@ pub fn predicate_to_en_predicate<'a>(p: &'a Predicate<EnValue>) -> EnPredicate<'
     EnPredicate { target, target_is_meta, rel: *rel, con }
 }
 impl<L: LogProvider> Matcher<EnValue> for EnMatcher<'_, L> {
-    fn subset_matching(
-        &self, predicate: &Predicate<EnValue>, input: &RoaringBitmap,
-    ) -> RoaringBitmap {
+    fn subset_matching(&self, predicate: &Predicate<EnValue>, input: &Roaring) -> Roaring {
         let mut res = input.clone();
         let EnPredicate { target, target_is_meta, rel, con } = predicate_to_en_predicate(predicate);
-        for id in input {
+        for id in input.iter() {
             let matches_here = span_matches_filter(self.log, id, target, target_is_meta, rel, con);
             if !matches_here {
                 res.remove(id);
@@ -848,16 +847,16 @@ impl<L: LogProvider> Matcher<EnValue> for EnMatcher<'_, L> {
         res
     }
 
-    fn subset_matching_dnf<'a, O, I>(&self, clauses: O, input: &RoaringBitmap) -> RoaringBitmap
+    fn subset_matching_dnf<'a, O, I>(&self, clauses: O, input: &Roaring) -> Roaring
     where
         O: Iterator<Item = I>,
         I: Iterator<Item = &'a Predicate<EnValue>>,
         EnValue: 'a,
     {
-        let mut res = RoaringBitmap::new();
+        let mut res = Roaring::new();
         let predicates_prepared: Vec<Vec<EnPredicate>> =
             clauses.map(|x| x.map(|y| predicate_to_en_predicate(y)).collect()).collect();
-        'outer: for id in input {
+        'outer: for id in input.iter() {
             for anded_clause in predicates_prepared.iter() {
                 let mut matches_in_and = true;
                 for predicate in anded_clause {
@@ -867,7 +866,7 @@ impl<L: LogProvider> Matcher<EnValue> for EnMatcher<'_, L> {
                 }
                 // OR join -> matches in one anded clause means the whole thing matches
                 if matches_in_and {
-                    res.insert(id);
+                    res.add(id);
                     continue 'outer;
                 }
             }
@@ -878,9 +877,9 @@ impl<L: LogProvider> Matcher<EnValue> for EnMatcher<'_, L> {
 /// construct an Evaluator that can evaluate the expression in filterset.
 /// You need to normalize and eval yourself.
 pub fn construct_evaluator(
-    filterset: &Table,
+    filterset: &Table, nitems: u32,
 ) -> mlua::Result<crate::filtersets::Evaluator<EnValue>> {
-    let mut evaluator = crate::filtersets::Evaluator::new();
+    let mut evaluator = crate::filtersets::Evaluator::new(nitems);
     let items: Table = filterset.get("items")?;
     let item_cnt = items.len()?;
 
@@ -897,7 +896,7 @@ pub fn en_filterset_materialize(
     log: &impl LogProvider, lua: &Lua,
 ) -> impl Fn(Table) -> mlua::Result<Table> {
     |filterset: Table| {
-        let mut evaluator = construct_evaluator(&filterset)?;
+        let mut evaluator = construct_evaluator(&filterset, log.len() as u32)?;
 
         let nstart = Instant::now();
         let root: usize = filterset.get("root")?;
