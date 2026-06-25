@@ -247,22 +247,23 @@ pub fn et_v1_to_v2<W: Write, R: Read + Seek, RW: Read + Write + Seek>(
 /// Convert a version 1 iet file to a version 2 (latest as of writing) format.
 /// It is the caller's responsibility to buffer IO.
 pub fn iet_v1_to_v2<W: Write, R: Read + Seek>(
-    inp: &mut R, out: &mut W,
+    inp: &mut R, out: &mut W, skip_validating_magic: bool,
 ) -> Result<(), ConvertError> {
     use ConvertError::*;
     use bincode::serde::{decode_from_std_read, encode_into_std_write};
     const CFG: Configuration = bincode::config::standard();
-
-    let mut input_magic = [0; 10];
-    inp.read_exact(&mut input_magic).map_err(ReadInputError)?;
-    let (version, ty) = parse_entrace_magic(&input_magic)?;
-    if version != 1 {
-        return Err(ConvertError::InputVersionMismatch(version, 1));
-    } else if ty != StorageFormat::ET {
-        return Err(ConvertError::InputFormatMismatch(ty, StorageFormat::IET));
+    if !skip_validating_magic {
+        let mut input_magic = [0; 10];
+        inp.read_exact(&mut input_magic).map_err(ReadInputError)?;
+        let (version, ty) = parse_entrace_magic(&input_magic)?;
+        if version != 1 {
+            return Err(ConvertError::InputVersionMismatch(version, 1));
+        } else if ty != StorageFormat::ET {
+            return Err(ConvertError::InputFormatMismatch(ty, StorageFormat::IET));
+        }
     }
 
-    let out_magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::ET);
+    let out_magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::IET);
     out.write_all(&out_magic).map_err(OutWriteError)?;
 
     loop {

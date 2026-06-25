@@ -74,7 +74,7 @@ fn main() -> anyhow::Result<()> {
             let mut out_writer = BufWriter::new(out_file);
             match (in_version, format, out_format) {
                 (1, StorageFormat::IET, StorageFormat::IET) => {
-                    convert::iet_v1_to_v2(&mut reader, &mut out_writer)
+                    convert::iet_v1_to_v2(&mut reader, &mut out_writer, true)
                         .context("Conversion failed")?;
                 }
                 (1, StorageFormat::ET, StorageFormat::ET) => {
