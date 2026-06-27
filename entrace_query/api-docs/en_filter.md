@@ -9,7 +9,7 @@ This function has two possible signatures:
     - value: a constant to compare with.
   - src: a filterset.
 2. `en_filter(target: String, relation: String, value: T, src: Table) -> Table`
-  This is basically the same, but with the table fields from above unpacked conveniently
+   This is basically the same, but with the table fields from above unpacked conveniently
 
 ## OUTPUT
 A filterset that matches only the spans which satisfy the relation.

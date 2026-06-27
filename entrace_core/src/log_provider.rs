@@ -31,21 +31,25 @@ pub type LogProviderResult<T> = Result<T, LogProviderError>;
 ///
 /// Get one with [crate::load_trace] or [crate::remote::RemoteLogProvider].
 pub trait LogProvider {
-    fn children(&self, x: u32) -> LogProviderResult<&[u32]>;
-    fn parent(&self, x: u32) -> LogProviderResult<u32>;
+    fn children(&self, idx: u32) -> LogProviderResult<&[u32]>;
+    fn parent(&self, idx: u32) -> LogProviderResult<u32>;
 
-    fn attr_names(&'_ self, x: u32) -> LogProviderResult<Vec<&'_ str>>;
-    fn attr_values(&'_ self, x: u32) -> LogProviderResult<Vec<EnValueRef<'_>>>;
+    fn attr_names(&'_ self, idx: u32) -> LogProviderResult<Vec<&'_ str>>;
+    fn attr_values(&'_ self, idx: u32) -> LogProviderResult<Vec<EnValueRef<'_>>>;
     /// Equivalent to a search on attr_names/attr_values, but might be faster depending on the
     /// implementation.
-    fn attr_value(&self, x: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>> {
-        let attr_names = self.attr_names(x)?;
-        let attr_values = self.attr_values(x)?;
+    fn attr_value(&self, idx: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>> {
+        let attr_names = self.attr_names(idx)?;
+        let attr_values = self.attr_values(idx)?;
         Ok(attr_names.iter().position(|&k| k == name).map(|i| attr_values[i].clone()))
     }
 
-    fn header(&'_ self, x: u32) -> LogProviderResult<Header<'_>>;
-    fn meta(&'_ self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>>;
+    fn header(&'_ self, idx: u32) -> LogProviderResult<Header<'_>>;
+    fn meta(&'_ self, idx: u32) -> LogProviderResult<MetadataRefContainer<'_>>;
+    /// Equivalent to header.message, but some implementations might offer a fast path for this.
+    fn message(&'_ self, idx: u32) -> LogProviderResult<Option<&'_ str>> {
+        Ok(self.header(idx)?.message)
+    }
 
     /// The total amount of messages in this provider.
     /// This MUST be cheap as the frontend might call this every frame.
@@ -57,11 +61,6 @@ pub trait LogProvider {
     /// The [LogProvider] implementation MUST ensure that this terminates quickly,
     /// as it directly affects FPS.
     fn frame_callback(&mut self) {}
-
-    /// Equivalent to header.message, but some implementations might offer a fast path for this.
-    fn message(&'_ self, x: u32) -> LogProviderResult<Option<&'_ str>> {
-        Ok(self.header(x)?.message)
-    }
 }
 
 pub enum LogProviderImpl {
