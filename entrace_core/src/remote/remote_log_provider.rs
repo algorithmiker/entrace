@@ -204,41 +204,26 @@ impl RemoteLogProvider {
         Self(base)
     }
 }
+
+macro_rules! dispatch_to_parent {
+    (fn $name:ident ( $($varname:ident : $vart:ty),* ) -> $res: ty) => {
+        fn $name(&self, $($varname : $vart),*) -> $res {
+            self.0.$name($($varname),*)
+        }
+    };
+}
 impl LogProvider for RemoteLogProvider {
-    fn children(&self, x: u32) -> LogProviderResult<&[u32]> {
-        self.0.children(x)
-    }
-
-    fn parent(&self, x: u32) -> LogProviderResult<u32> {
-        self.0.parent(x)
-    }
-
-    fn attr_names(&'_ self, x: u32) -> LogProviderResult<Vec<&'_ str>> {
-        self.0.attr_names(x)
-    }
-    fn attr_values(&'_ self, x: u32) -> LogProviderResult<Vec<EnValueRef<'_>>> {
-        self.0.attr_values(x)
-    }
-    fn attr_value(&'_ self, x: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>> {
-        self.0.attr_value(x, name)
-    }
-
-    fn header(&'_ self, x: u32) -> LogProviderResult<Header<'_>> {
-        self.0.header(x)
-    }
-    fn message(&'_ self, x: u32) -> LogProviderResult<Option<&str>> {
-        self.0.message(x)
-    }
-
-    fn meta(&'_ self, x: u32) -> LogProviderResult<MetadataRefContainer<'_>> {
-        self.0.meta(x)
-    }
+    dispatch_to_parent!(fn children(x: u32) -> LogProviderResult<&[u32]>);
+    dispatch_to_parent!(fn parent(x: u32) -> LogProviderResult<u32>);
+    dispatch_to_parent!(fn attr_names(x: u32) -> LogProviderResult<Vec<&'_ str>>);
+    dispatch_to_parent!(fn attr_values(x: u32) -> LogProviderResult<Vec<EnValueRef<'_>>>);
+    dispatch_to_parent!(fn attr_value(x: u32, name: &str) -> LogProviderResult<Option<EnValueRef<'_>>>);
+    dispatch_to_parent!(fn header(x: u32) -> LogProviderResult<Header<'_>>);
+    dispatch_to_parent!(fn message(x: u32) -> LogProviderResult<Option<&str>>);
+    dispatch_to_parent!(fn meta(x: u32) -> LogProviderResult<MetadataRefContainer<'_>>);
+    dispatch_to_parent!(fn len()-> usize);
 
     fn frame_callback(&mut self) {
-        self.0.frame_callback()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
+        self.0.frame_callback();
     }
 }
