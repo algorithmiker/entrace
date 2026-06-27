@@ -31,12 +31,12 @@ pub enum Filterset {
     Invert(FiltersetId, FiltersetId),
 }
 impl Filterset {
-    pub fn children(&self) -> ChildrenRef<'_> {
+    pub fn children(&self) -> ChildrenIter<'_> {
         match self {
-            Filterset::Dead | Filterset::Primitive(_) => ChildrenRef::None,
-            Filterset::BlackBox(a) | Filterset::RelDnf(_, a) => ChildrenRef::One(*a),
-            Filterset::Invert(a, u) => ChildrenRef::Two(*a, *u),
-            Filterset::And(i) | Filterset::Or(i) => ChildrenRef::Many(i),
+            Filterset::Dead | Filterset::Primitive(_) => ChildrenIter::None,
+            Filterset::BlackBox(a) | Filterset::RelDnf(_, a) => ChildrenIter::One(*a),
+            Filterset::Invert(a, u) => ChildrenIter::Two(*a, *u),
+            Filterset::And(i) | Filterset::Or(i) => ChildrenIter::Many(i.iter()),
         }
     }
 }
@@ -55,13 +55,35 @@ pub enum RewriteAction {
     EliminateSingleOr(FiltersetId),
     EliminateSingleAnd(FiltersetId),
 }
-pub enum ChildrenRef<'a> {
+
+pub enum ChildrenIter<'a> {
     None,
     One(FiltersetId),
     Two(FiltersetId, FiltersetId),
-    Many(&'a HashSet<FiltersetId>),
+    Many(std::collections::hash_set::Iter<'a, FiltersetId>),
 }
+impl<'a> Iterator for ChildrenIter<'a> {
+    type Item = FiltersetId;
 
+    fn next(&mut self) -> Option<Self::Item> {
+        // on every call, we "trickle down" one level down for Two/One/None
+        match std::mem::replace(self, ChildrenIter::None) {
+            ChildrenIter::None => None,
+            ChildrenIter::One(id) => Some(id),
+            ChildrenIter::Two(id1, id2) => {
+                *self = ChildrenIter::One(id2);
+                Some(id1)
+            }
+            ChildrenIter::Many(mut iter) => {
+                let next_item = iter.next();
+                if next_item.is_some() {
+                    *self = ChildrenIter::Many(iter);
+                }
+                next_item.copied()
+            }
+        }
+    }
+}
 // I don't know what would be optimal, this is just going by feeling
 const MAX_DNF_CLAUSES: usize = 128;
 const DNFS_IN_AND_MERGE_MAX_CLAUSES: usize = MAX_DNF_CLAUSES / 2;
@@ -352,24 +374,9 @@ impl<T> Evaluator<T> {
         //let mut visited = HashSet::new();
         while let Some(v) = stack1.pop() {
             stack2.push(v);
-            match self.pool[v].children() {
-                ChildrenRef::None => continue,
-                ChildrenRef::One(x) => {
-                    stack1.push(x);
-                    parent_of[x] = v;
-                }
-                ChildrenRef::Two(a, b) => {
-                    stack1.push(a);
-                    stack1.push(b);
-                    parent_of[a] = v;
-                    parent_of[b] = v;
-                }
-                ChildrenRef::Many(items) => {
-                    stack1.extend(items);
-                    for item in items {
-                        parent_of[*item] = v;
-                    }
-                }
+            for item in self.pool[v].children() {
+                stack1.push(item);
+                parent_of[item] = v;
             }
         }
         stack2.reverse();
@@ -428,21 +435,10 @@ impl<T> Evaluator<T> {
         while let Some((node, ready)) = stack.pop() {
             if !ready {
                 stack.push((node, true));
-                match self.pool[node].children() {
-                    ChildrenRef::None => (),
-                    ChildrenRef::One(x) => {
-                        stack.push((x, false));
-                    }
-                    ChildrenRef::Two(a, b) => {
-                        stack.push((a, false));
-                        stack.push((b, false));
-                    }
-                    ChildrenRef::Many(items) => {
-                        for item in items {
-                            stack.push((*item, false));
-                        }
-                    }
+                for child in self.pool[node].children() {
+                    stack.push((child, false));
                 }
+
                 continue;
             }
             // ready to materialize.
@@ -501,24 +497,9 @@ impl<T: Debug> Evaluator<T> {
         while let Some(v) = stack.pop() {
             let node = format!("{:?}", &self.pool[v]).replace('"', "'");
             writeln!(out, "  n{v} [label=\"{node}\"];").ok();
-            match self.pool[v].children() {
-                ChildrenRef::None => (),
-                ChildrenRef::One(a) => {
-                    stack.push(a);
-                    writeln!(out, "  n{v} -> n{a};").ok();
-                }
-                ChildrenRef::Two(a, b) => {
-                    stack.push(a);
-                    stack.push(b);
-                    writeln!(out, "  n{v} -> n{a};").ok();
-                    writeln!(out, "  n{v} -> n{b};").ok();
-                }
-                ChildrenRef::Many(items) => {
-                    for item in items {
-                        writeln!(out, "  n{v} -> n{item};").ok();
-                    }
-                    stack.extend(items);
-                }
+            for child in self.pool[v].children() {
+                stack.push(child);
+                writeln!(out, "  n{v} -> n{child};").ok();
             }
         }
         out.push('}');
