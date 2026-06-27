@@ -28,15 +28,14 @@ pub enum Filterset {
     RelDnf(Vec<Vec<PredicateId>>, FiltersetId),
     And(HashSet<FiltersetId>),
     Or(HashSet<FiltersetId>),
-    Not(FiltersetId),
+    Invert(FiltersetId, FiltersetId),
 }
 impl Filterset {
     pub fn children(&self) -> ChildrenRef<'_> {
         match self {
             Filterset::Dead | Filterset::Primitive(_) => ChildrenRef::None,
-            Filterset::Not(a) | Filterset::BlackBox(a) | Filterset::RelDnf(_, a) => {
-                ChildrenRef::One(*a)
-            }
+            Filterset::BlackBox(a) | Filterset::RelDnf(_, a) => ChildrenRef::One(*a),
+            Filterset::Invert(a, u) => ChildrenRef::Two(*a, *u),
             Filterset::And(i) | Filterset::Or(i) => ChildrenRef::Many(i),
         }
     }
@@ -59,6 +58,7 @@ pub enum RewriteAction {
 pub enum ChildrenRef<'a> {
     None,
     One(FiltersetId),
+    Two(FiltersetId, FiltersetId),
     Many(&'a HashSet<FiltersetId>),
 }
 
@@ -177,8 +177,10 @@ impl<T> Evaluator<T> {
                 }
             }
 
-            Filterset::Not(y) => {
-                if let Filterset::Not(q) = &self.pool[*y] {
+            Filterset::Invert(y, u) => {
+                if let Filterset::Invert(q, u2) = &self.pool[*y]
+                    && u == u2
+                {
                     return RewriteAction::EliminateNotNot(id, *y, *q);
                 }
             }
@@ -349,15 +351,18 @@ impl<T> Evaluator<T> {
         // and the children won't put it on the stack again.
         //let mut visited = HashSet::new();
         while let Some(v) = stack1.pop() {
-            //   if visited.insert(v) {
-            //       continue;
-            //   }
             stack2.push(v);
             match self.pool[v].children() {
                 ChildrenRef::None => continue,
                 ChildrenRef::One(x) => {
                     stack1.push(x);
                     parent_of[x] = v;
+                }
+                ChildrenRef::Two(a, b) => {
+                    stack1.push(a);
+                    stack1.push(b);
+                    parent_of[a] = v;
+                    parent_of[b] = v;
                 }
                 ChildrenRef::Many(items) => {
                     stack1.extend(items);
@@ -428,6 +433,10 @@ impl<T> Evaluator<T> {
                     ChildrenRef::One(x) => {
                         stack.push((x, false));
                     }
+                    ChildrenRef::Two(a, b) => {
+                        stack.push((a, false));
+                        stack.push((b, false));
+                    }
                     ChildrenRef::Many(items) => {
                         for item in items {
                             stack.push((*item, false));
@@ -466,9 +475,10 @@ impl<T> Evaluator<T> {
                     }
                     self.results.insert(node, r);
                 }
-                Filterset::Not(src) => {
+                Filterset::Invert(src, universe) => {
                     let source_result = &self.results[src];
-                    self.results.insert(node, source_result.flip(0..self.nitems));
+                    let universe_result = &self.results[universe];
+                    self.results.insert(node, universe_result - source_result);
                 }
                 Filterset::RelDnf(items, src) => {
                     let this_result = matcher.subset_matching_dnf(
@@ -496,6 +506,12 @@ impl<T: Debug> Evaluator<T> {
                 ChildrenRef::One(a) => {
                     stack.push(a);
                     writeln!(out, "  n{v} -> n{a};").ok();
+                }
+                ChildrenRef::Two(a, b) => {
+                    stack.push(a);
+                    stack.push(b);
+                    writeln!(out, "  n{v} -> n{a};").ok();
+                    writeln!(out, "  n{v} -> n{b};").ok();
                 }
                 ChildrenRef::Many(items) => {
                     for item in items {

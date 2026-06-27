@@ -723,22 +723,64 @@ pub fn en_filterset_dnf(lua: &Lua, (clauses, src): (Table, Table)) -> mlua::Resu
     Ok(new_fs)
 }
 
-// en_filterset_not()
-// input: filterset
+// en_filterset_invert()
+// input: two filtersets, a target and an universe
 // outputs: a filterset that matches an item exactly if it is not in the filterset.
-#[doc = include_str!("../api-docs/en_filterset_not.md")]
-pub fn en_filterset_not(lua: &Lua, filterset: Table) -> mlua::Result<Table> {
+//
+// so the input is
+// t={ type: "filterset",
+//    root: 1,
+//    items: {
+//      { type = "prim_list", value = {1,2,3}},
+//      { type = "rel_dnf", src = 0,
+//        clauses = {{{ target = "c", relation = "EQ", value = "0", src = 0 }}}
+//      }
+//  }
+// u={ type: "filterset",
+//    root: 1,
+//    items: {
+//      { type = "prim_list", value = {4,5,6}},
+//      { type = "rel_dnf", src = 0,
+//        clauses = {{{ target = "c", relation = "EQ", value = "0", src = 0 }}}
+//      }
+//  }
+//
+//  and the output should be
+//  { type: "filterset",
+//    root: 4,
+//    items: {
+//      { type = "prim_list", value = {1,2,3}},
+//      { type = "rel_dnf", src = 0,
+//        clauses = {{{ target = "c", relation = "EQ", value = "0", src = 0 }}}
+//      }
+//      { type = "prim_list", value = {4,5,6}},
+//      { type = "rel_dnf", src = 0,
+//        clauses = {{{ target = "c", relation = "EQ", value = "0", src = 0 }}}
+//      }
+//      { type = "invert", src = 1, universe = 3 }
+//  }
+#[doc = include_str!("../api-docs/en_filterset_invert.md")]
+pub fn en_filterset_invert(
+    lua: &Lua, (filterset, universe): (Table, Table),
+) -> mlua::Result<Table> {
     let new_fs = deepcopy_table(lua, &filterset)?;
+    // TODO: this could be optimized by changing concat_items_lists, but it accepts only a table
+    // right now
+    let (new_items, srcs) = {
+        let tbl = lua.create_table()?;
+        tbl.push(filterset)?;
+        tbl.push(universe)?;
+        concat_items_lists(lua, tbl)?
+    };
+
     let not = lua.create_table()?;
     not.set("type", "invert")?;
-    let new_items: Table = new_fs.get("items")?;
-    not.set("src", new_items.len()? - 1)?;
+    not.set("src", srcs[0])?;
+    not.set("universe", srcs[1])?;
     new_items.push(not)?;
     new_fs.set("root", new_items.len()? - 1)?;
+    new_fs.set("items", new_items)?;
     Ok(new_fs)
-    TODO: en_filterset_not(en_filter("breadth", "EQ", 1000, en_filterset_from_range(en_span_range())))
-    this will return MORE spans than there are in 1GB.et. try to fix.
-
 }
 
 /// Creates a Predicate from a Table that has keys "target", "relation", "value"
@@ -810,7 +852,7 @@ fn item_to_filterset(
             Ok(Filterset::And(item.get("srcs")?))
         }
         "union" => Ok(Filterset::And(item.get("srcs")?)),
-        "invert" => Ok(Filterset::Not(item.get("src")?)),
+        "invert" => Ok(Filterset::Invert(item.get("src")?, item.get("universe")?)),
         x => Err(anyhow::anyhow!("Unknown filterset item type {x}").into_lua_err()),
     }
 }
@@ -1021,7 +1063,7 @@ macro_rules! lua_setup_with_wrappers {
         globals.set("en_filterset_union", $lua.create_function(en_filterset_union)?)?;
         globals.set("en_filterset_intersect", $lua.create_function(en_filterset_intersect)?)?;
         globals.set("en_filterset_dnf", $lua.create_function(en_filterset_dnf)?)?;
-        globals.set("en_filterset_not", $lua.create_function(en_filterset_not)?)?;
+        globals.set("en_filterset_invert", $lua.create_function(en_filterset_invert)?)?;
         globals.set(
             "en_filterset_materialize",
             $lua.create_function($lua_wrap2!(t, Table, en_filterset_materialize))?,

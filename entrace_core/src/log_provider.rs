@@ -9,7 +9,7 @@ use crate::{
 
 #[derive(thiserror::Error, Debug)]
 pub enum LogProviderError {
-    #[error("Out of bounds. Tried to access index {idx} from a trace of length {len}")]
+    #[error("Out of bounds. Tried to access index {idx} from a collection of length {len}")]
     OutOfBounds { idx: usize, len: usize },
     // TODO: investigate if boxing here would result in better or worse performance
     #[error("Failed to decode a binary value")]
