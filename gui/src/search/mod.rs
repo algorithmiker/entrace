@@ -212,6 +212,7 @@ impl SearchState {
             tx.send((Ok(qr), elapsed)).ok();
         });
     }
+    #[deprecated = "use .with_autocomplete_enabled to not forget to enable autocomplete"]
     pub fn new() -> Self {
         Self {
             text: SearchTextState::default(),
@@ -222,12 +223,26 @@ impl SearchState {
             query_timing: vec![],
         }
     }
-}
-impl Default for SearchState {
-    fn default() -> Self {
-        Self::new()
+    pub fn with_autocomplete_enabled(autocomplete_enabled: bool) -> Self {
+        let text = SearchTextState {
+            text: String::new(),
+            autocompleter: if autocomplete_enabled {
+                Autocompleter::Enabled(Default::default())
+            } else {
+                Autocompleter::Disabled
+            },
+        };
+        Self {
+            text,
+            settings: QuerySettings::new(),
+            queries: vec![],
+            last_id: 0,
+            query_window_open: vec![],
+            query_timing: vec![],
+        }
     }
 }
+
 /// materialize the filterset, if a filterset; or else just extract a Vec<u32>
 fn lua_result_to_ids(
     result: mlua::Value, lua: &Lua, log: &impl LogProvider,

@@ -27,6 +27,7 @@ pub mod notifications;
 pub mod search;
 pub mod self_tracing;
 pub mod settings;
+pub mod tiles;
 pub mod tree;
 
 #[cfg(not(target_arch = "wasm32"))]

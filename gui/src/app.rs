@@ -9,9 +9,10 @@ use std::{
 use anyhow::Context;
 use clap::Parser;
 use egui::{
-    Color32, Margin, Pos2, Rect, RichText, Stroke, TextEdit, Theme, Ui,
+    Color32, Frame, Margin, Pos2, Rect, RichText, Stroke, TextEdit, Theme, Ui,
     epaint::text::{FontInsert, InsertFontFamily},
 };
+use egui_tiles::{Container, Tabs, Tile, Tree};
 use entrace_core::{
     IETLoadConfig, IETPresentationConfig, LoadConfig, LogProvider,
     remote::{FileWatchConfig, NotifyExt},
@@ -25,7 +26,7 @@ use tracing::info;
 
 use crate::{
     LogState, LogStatus,
-    benchmarkers::BenchmarkManager,
+    benchmarkers::{BenchmarkManager, SamplingBenchmark},
     cmdline::Cmdline,
     connection_dialog::{ConnectionDialog, connect_dialog},
     convert_dialog::{self, ConvertDialogState},
@@ -34,18 +35,16 @@ use crate::{
     frame_time::{FrameTimeTracker, TrackFrameTime, us_to_human},
     homepage::center,
     notifications::{self, NotificationHandle, RefreshToken},
-    row_height_from_ctx,
-    search::{self, LocatingState, SearchState, query_window::query_windows},
+    search::{LocatingState, SearchState},
     self_tracing::SelfTracingState,
     settings::{self, SettingsDialogState, SettingsState, apply_settings},
+    tiles::Pane,
     time_print, time_trace,
     tree::TreeView,
 };
 pub struct App {
     pub file_picker_state: FilePickerState,
     pub connect_dialog: ConnectionDialog,
-    pub log_status: LogStatus,
-    pub search_state: SearchState,
     pub notifier: NotificationHandle,
     pub frame_time_tracker: FrameTimeTracker,
     pub self_tracing_state: SelfTracingState,
@@ -56,13 +55,12 @@ pub struct App {
     pub benchmarks: BenchmarkManager,
     pub about_state: AboutState,
     pub api_docs_state: ApiDocsState,
+    pub tiles: Tree<Pane>,
 }
 impl Default for App {
     fn default() -> Self {
         Self {
             file_picker_state: FilePickerState::NoPick,
-            log_status: LogStatus::NoFileOpened,
-            search_state: SearchState::new(),
             connect_dialog: ConnectionDialog::not_open(),
             notifier: NotificationHandle::default(),
             self_tracing_state: SelfTracingState::default(),
@@ -74,6 +72,7 @@ impl Default for App {
             benchmarks: BenchmarkManager::default(),
             about_state: AboutState::new(),
             api_docs_state: ApiDocsState::default(),
+            tiles: Tree::empty("default"),
         }
     }
 }
@@ -104,6 +103,7 @@ impl App {
             style.visuals.window_stroke = Stroke::new(0.7, Color32::WHITE);
         });
         let mut app = App { ..Default::default() };
+
         let args = time_print("parsing args", Cmdline::parse);
         if let Some(x) = args.file_path {
             let path = PathBuf::from(x);
@@ -142,11 +142,40 @@ impl App {
         ));
         app
     }
+    pub fn add_tree_tab(&mut self, pane: Pane) {
+        let id = self.tiles.tiles.insert_pane(pane);
+        if self.tiles.root.is_none() {
+            self.tiles.root = Some(self.tiles.tiles.insert_tab_tile(vec![]));
+        }
+        let root_id = self.tiles.root.unwrap();
 
+        if let Some(Tile::Container(Container::Tabs(tabs))) = self.tiles.tiles.get_mut(root_id) {
+            tabs.add_child(id);
+        } else {
+            if let Some(old_root_tile) = self.tiles.tiles.remove(root_id) {
+                let old_root_new_id = self.tiles.tiles.insert_new(old_root_tile);
+                // add a new tabs container with both the old root and the new child
+                let new_tabs_tile =
+                    Tile::Container(Container::Tabs(Tabs::new(vec![old_root_new_id, id])));
+                self.tiles.tiles.insert(root_id, new_tabs_tile);
+            }
+        }
+    }
     pub fn open_file(&mut self, path: impl AsRef<Path> + Send + 'static, ctx: egui::Context) {
         let path_clone = path.as_ref().to_path_buf();
         let (tx, rx) = crossbeam::channel::bounded(1);
-        self.log_status = LogStatus::Loading(rx);
+        let filename = path
+            .as_ref()
+            .file_name()
+            .map(|x| x.to_string_lossy())
+            .unwrap_or_else(|| "unnamed".into());
+        self.add_tree_tab(Pane::Tree {
+            name: filename.to_string(),
+            log: LogStatus::Loading(rx),
+            get_tree_bench: SamplingBenchmark::new("get_tree", false),
+            search_state: SearchState::with_autocomplete_enabled(true),
+        });
+
         info!("set log status to loading");
         spawn_task(move || {
             let (event_tx, event_rx) = crossbeam::channel::unbounded();
@@ -233,7 +262,7 @@ impl App {
             }
         }
 
-        egui::Panel::top("top_panel").show_inside(ui, |ui| {
+        egui::Panel::top("top_panel").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Open").clicked() {
@@ -295,31 +324,12 @@ impl App {
                 }
             });
         });
-        if let LogStatus::Ready(log_state) = &self.log_status {
-            let font_size = row_height_from_ctx(ui.ctx());
-            let text_field_margin = Margin::symmetric(4, 2);
-            let text_field_size =
-                font_size * 2.0 + text_field_margin.topf() + text_field_margin.bottomf();
-
-            egui::Panel::bottom("bottom_panel")
-                .min_size(text_field_size)
-                .resizable(true)
-                .show_inside(ui, |ui| {
-                    search::bottom_panel_ui(
-                        ui,
-                        &mut self.search_state,
-                        &mut self.api_docs_state,
-                        log_state,
-                        text_field_margin,
-                    );
-                });
-        }
-
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        let mut frame = Frame::central_panel(ui.style());
+        frame.inner_margin = Margin::ZERO;
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             settings::settings_dialog(ui.ctx(), self);
             connect_dialog(ui.ctx(), self);
             convert_dialog::convert_dialog(ui, self);
-            query_windows(ui, self);
             about_dialog(ui.ctx(), self);
             api_docs_dialog(ui.ctx(), &mut self.api_docs_state);
             let available_rect = ui.available_rect_before_wrap();

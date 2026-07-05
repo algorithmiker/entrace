@@ -12,9 +12,9 @@ circular-buffer = "1.1.0"
 clap = { version = "4.5.40", features = ["derive"] }
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 directories = "6.0.0"
-eframe = "0.34.0"
-egui = "0.34.0"
-egui_extras = { version = "0.34.0", features = ["svg"] }
+eframe = "0.35.0"
+egui = "0.35.0"
+egui_extras = { version = "0.35.0", features = ["svg"] }
 entrace_core = { version = "0.2.0", path = "../entrace_core/" }
 entrace_query = { version = "0.1.1", path = "../entrace_query/" }
 memchr = "2.7.5"
@@ -30,6 +30,7 @@ nucleo-matcher = "0.3.1"
 # dev only
 subsecond = {version = "0.7.2", optional = true}
 dioxus-devtools = {version = "0.7.2", optional = true}
+egui_tiles = "0.16.0"
 [features]
 dev = ["dep:subsecond", "dep:dioxus-devtools"]
 

@@ -1,6 +1,10 @@
 use crate::{
-    App, LevelRepr, LogStatus, TraceReader, row_height,
+    App, LevelRepr, LogStatus, TraceReader,
+    benchmarkers::SamplingBenchmark,
+    notifications::NotificationHandle,
+    row_height,
     search::LocatingState,
+    tiles::Behaviour,
     tree::{TreeContextMut, tree_view},
 };
 use egui::{CollapsingHeader, Color32, Response, RichText, ScrollArea, Ui, vec2};
@@ -135,12 +139,18 @@ pub fn span(
     header_res.header_response.context_menu(|ui| {
         #[allow(irrefutable_let_patterns)]
         if let SpanContext::QueryResults { locating_state, trace_provider } = ctx {
-            let enabled = locating_state.borrow().can_start_new();
-            let btn = egui::Button::new("Locate in main tree");
-            if ui.add_enabled(enabled, btn).clicked() {
-                info!("Will locate {id}");
-                *locating_state.borrow_mut() = LocatingState::start_locating(id, trace_provider);
-            };
+            let can_start_new = locating_state.borrow().can_start_new();
+            if can_start_new {
+                if ui.button("Locate in main tree").clicked() {
+                    info!("Will locate {id}");
+                    *locating_state.borrow_mut() =
+                        LocatingState::start_locating(id, trace_provider);
+                }
+            } else {
+                if ui.button("Stop locating").clicked() {
+                    *locating_state.borrow_mut() = LocatingState::None;
+                }
+            }
         }
         if ui.button("Close this menu").clicked() {
             ui.close();
@@ -157,24 +167,37 @@ pub fn span(
 }
 
 pub fn center(ui: &mut Ui, app: &mut App) {
-    match app.log_status {
-        LogStatus::Ready(ref mut state) => {
+    app.tiles.ui(
+        &mut Behaviour {
+            demo_mode: app.ephemeral_settings.demo_mode,
+            notifier: app.notifier.clone(),
+            api_docs_state: &mut app.api_docs_state,
+        },
+        ui,
+    );
+}
+pub fn paint_log(
+    ui: &mut Ui, log_status: &mut LogStatus, demo_mode: bool, notifier: &NotificationHandle,
+    get_tree_bench: &mut SamplingBenchmark<1>,
+) {
+    match log_status {
+        LogStatus::Ready(state) => {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                 ui.label("file:");
-                if app.ephemeral_settings.demo_mode {
+                if demo_mode {
                     ui.label("demo.et");
                 } else {
                     ui.label(state.file_path.display().to_string());
                 }
             });
 
-            let delta = state.on_frame(&app.notifier);
+            let delta = state.on_frame(notifier);
             if delta != 0 {
                 state.is_open.extend(std::iter::repeat_n(false, delta));
                 state.meta_open.extend(std::iter::repeat_n(false, delta));
                 state.tree_view.invalidate();
             }
-            state.update_tree(&mut app.benchmarks.get_tree);
+            state.update_tree(get_tree_bench);
             let row_height = row_height(ui);
             let trace_reader = state.trace_provider.read().unwrap();
             let tree_ctx = TreeContextMut {
@@ -195,13 +218,13 @@ pub fn center(ui: &mut Ui, app: &mut App) {
         LogStatus::NoFileOpened => {
             ui.label("No trace loaded. Open a file, or set up a server with the File menu.");
         }
-        LogStatus::Loading(ref rx) => {
+        LogStatus::Loading(rx) => {
             if let Ok(y) = rx.try_recv() {
-                app.log_status = y;
+                *log_status = y;
             }
             ui.spinner();
         }
-        LogStatus::Error(ref error) => {
+        LogStatus::Error(error) => {
             ui.label(format!("Error:\n{error:?}"));
         }
     }

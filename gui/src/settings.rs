@@ -3,7 +3,7 @@ use crossbeam::channel::Receiver;
 use directories::ProjectDirs;
 use egui::{
     Color32, Context, DragValue, InnerResponse, Margin, RichText, TextStyle, ThemePreference, Ui,
-    epaint::AlphaFromCoverage, pos2, vec2,
+    epaint::FontColorTransferFunction, pos2, vec2,
 };
 use entrace_core::remote::{NotifyExt, Refresh};
 use notify::{RecommendedWatcher, Watcher};
@@ -29,6 +29,7 @@ use crate::{
     rect,
     search::Autocompleter,
     self_tracing::{SelfTracingLevel, SelfTracingState},
+    tiles::Pane,
     time_print,
 };
 pub enum SettingsMessage {
@@ -108,12 +109,11 @@ impl TextGamma {
         buf
     }
 }
-impl From<&TextGamma> for AlphaFromCoverage {
+impl From<&TextGamma> for FontColorTransferFunction {
     fn from(value: &TextGamma) -> Self {
         match value {
-            TextGamma::DarkSpecial => AlphaFromCoverage::TwoCoverageMinusCoverageSq,
-            TextGamma::Gamma(1.0) => AlphaFromCoverage::Linear,
-            TextGamma::Gamma(x) => AlphaFromCoverage::Gamma(*x),
+            TextGamma::DarkSpecial => FontColorTransferFunction::TwoCoverageMinusCoverageSq,
+            TextGamma::Gamma(x) => FontColorTransferFunction::Gamma(*x),
         }
     }
 }
@@ -434,10 +434,12 @@ pub fn apply_settings(ctx: &Context, app: &mut App) {
         ctx.set_pixels_per_point(inner.settings.ui_scale);
         ctx.set_theme(inner.settings.theme);
         ctx.style_mut_of(egui::Theme::Light, |x| {
-            x.visuals.text_options.alpha_from_coverage = (&inner.settings.light_text_gamma).into()
+            x.visuals.text_options.color_transfer_function =
+                (&inner.settings.light_text_gamma).into()
         });
         ctx.style_mut_of(egui::Theme::Dark, |x| {
-            x.visuals.text_options.alpha_from_coverage = (&inner.settings.dark_text_gamma).into()
+            x.visuals.text_options.color_transfer_function =
+                (&inner.settings.dark_text_gamma).into()
         });
         match app.self_tracing_state {
             SelfTracingState::Disabled => {
@@ -465,10 +467,14 @@ pub fn apply_settings(ctx: &Context, app: &mut App) {
         if let SettingsDialogState::Some { ref mut settings_clone, .. } = app.settings_dialog {
             *settings_clone = inner.settings.clone();
         }
-        if inner.settings.query_autocomplete {
-            app.search_state.text.autocompleter = Autocompleter::Enabled(Default::default())
-        } else {
-            app.search_state.text.autocompleter = Autocompleter::Disabled;
+        for (_id, tile) in app.tiles.tiles.iter_mut() {
+            if let egui_tiles::Tile::Pane(Pane::Tree { search_state, .. }) = tile {
+                search_state.text.autocompleter = if inner.settings.query_autocomplete {
+                    Autocompleter::Enabled(Default::default())
+                } else {
+                    Autocompleter::Disabled
+                }
+            }
         }
     }
 }

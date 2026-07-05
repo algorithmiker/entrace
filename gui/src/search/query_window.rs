@@ -1,83 +1,79 @@
 use crate::{
-    App, LogState, LogStatus,
+    LogState, LogStatus,
     homepage::{SpanContext, span},
     layout_text,
-    search::{Query, QueryError, QueryResult, QueryTiming, search_settings_dialog},
+    search::{Query, QueryError, QueryResult, QueryTiming, SearchState, search_settings_dialog},
 };
 use egui::{Layout, ScrollArea, Ui, Widget};
 use entrace_core::display_error_context;
 use std::{cmp::min, fmt::Write, ops::Range};
 use tracing::{error, info};
 
-pub fn query_windows(ui: &mut Ui, app: &mut App) {
-    search_settings_dialog(ui, &mut app.search_state);
-    for i in 0..app.search_state.queries.len() {
-        let id = app.search_state.queries[i].id();
+pub fn query_windows(ui: &mut Ui, log_status: &mut LogStatus, search_state: &mut SearchState) {
+    search_settings_dialog(ui, search_state);
+    for i in 0..search_state.queries.len() {
+        let id = search_state.queries[i].id();
         let s = format!("Query {id}");
-        egui::Window::new(s).open(&mut app.search_state.query_window_open[i]).show(
-            ui.ctx(),
-            |ui| {
-                fn set_elapsed(i: usize, timing: &mut [QueryTiming]) {
-                    match timing[i] {
-                        QueryTiming::Loading(instant) => {
-                            timing[i] = QueryTiming::Finished(instant.elapsed())
-                        }
-                        QueryTiming::Finished(_) => unreachable!(),
+        egui::Window::new(s).open(&mut search_state.query_window_open[i]).show(ui.ctx(), |ui| {
+            fn set_elapsed(i: usize, timing: &mut [QueryTiming]) {
+                match timing[i] {
+                    QueryTiming::Loading(instant) => {
+                        timing[i] = QueryTiming::Finished(instant.elapsed())
                     }
+                    QueryTiming::Finished(_) => unreachable!(),
                 }
-                match app.search_state.queries[i] {
-                    Query::Loading { ref id, ref rx } => {
-                        match rx.try_recv() {
-                            Ok((res, elapsed)) => {
-                                app.search_state.queries[i] =
-                                    Query::Completed { id: *id, result: res };
-                                app.search_state.query_timing[i] = QueryTiming::Finished(elapsed)
-                            }
-                            Err(x) => match x {
-                                crossbeam::channel::TryRecvError::Empty => (),
-                                crossbeam::channel::TryRecvError::Disconnected => {
-                                    app.search_state.queries[i] = Query::Completed {
-                                        id: *id,
-                                        result: Err(QueryError::QueryDied),
-                                    };
-                                    set_elapsed(i, &mut app.search_state.query_timing);
-                                }
-                            },
+            }
+            match search_state.queries[i] {
+                Query::Loading { ref id, ref rx } => {
+                    match rx.try_recv() {
+                        Ok((res, elapsed)) => {
+                            search_state.queries[i] = Query::Completed { id: *id, result: res };
+                            search_state.query_timing[i] = QueryTiming::Finished(elapsed)
                         }
-                        ui.spinner();
-                    }
-                    Query::Completed { ref mut result, .. } => {
-                        let elapsed = &app.search_state.query_timing[i];
-                        ui.label(format!("Completed query in {:?}", elapsed.unwrap()));
-                        ui.separator();
-                        match result {
-                            Ok(x) => match &mut app.log_status {
-                                LogStatus::Ready(log_state) => query_result_list(ui, x, log_state),
-                                _ => error!(
-                                    "query_windows: want to show query result but it is already \
-                                     destroyed"
-                                ),
-                            },
-                            Err(x) => {
-                                ui.label("Query returned error:");
-                                let formmatted = display_error_context(x);
-                                ui.label(formmatted);
+                        Err(x) => match x {
+                            crossbeam::channel::TryRecvError::Empty => (),
+                            crossbeam::channel::TryRecvError::Disconnected => {
+                                search_state.queries[i] = Query::Completed {
+                                    id: *id,
+                                    result: Err(QueryError::QueryDied),
+                                };
+                                set_elapsed(i, &mut search_state.query_timing);
                             }
+                        },
+                    }
+                    ui.spinner();
+                }
+                Query::Completed { ref mut result, .. } => {
+                    let elapsed = &search_state.query_timing[i];
+                    ui.label(format!("Completed query in {:?}", elapsed.unwrap()));
+                    ui.separator();
+                    match result {
+                        Ok(x) => match log_status {
+                            LogStatus::Ready(log_state) => query_result_list(ui, x, log_state),
+                            _ => error!(
+                                "query_windows: want to show query result but it is already \
+                                 destroyed"
+                            ),
+                        },
+                        Err(x) => {
+                            ui.label("Query returned error:");
+                            let formmatted = display_error_context(x);
+                            ui.label(formmatted);
                         }
                     }
                 }
-            },
-        );
+            }
+        });
     }
-    let mut len = app.search_state.queries.len();
+    let mut len = search_state.queries.len();
     let mut i = 0;
     while i < len {
-        let id = app.search_state.queries[i].id();
-        if !app.search_state.query_window_open[i] {
+        let id = search_state.queries[i].id();
+        if !search_state.query_window_open[i] {
             info!("Will remove query with id {id}");
-            app.search_state.queries.remove(i);
-            app.search_state.query_window_open.remove(i);
-            app.search_state.query_timing.remove(i);
+            search_state.queries.remove(i);
+            search_state.query_window_open.remove(i);
+            search_state.query_timing.remove(i);
             len -= 1;
         }
         i += 1;

@@ -13,8 +13,13 @@ use entrace_core::{
 use tracing::info;
 
 use crate::{
-    App, LogState, LogStatus, enbitvec::EnBitVec, notifications::RefreshToken,
-    search::LocatingState, tree::TreeView,
+    App, LogState, LogStatus,
+    benchmarkers::SamplingBenchmark,
+    enbitvec::EnBitVec,
+    notifications::RefreshToken,
+    search::{LocatingState, SearchState},
+    tiles::Pane,
+    tree::TreeView,
 };
 
 pub enum ConnectionDialogState {
@@ -65,29 +70,33 @@ pub fn connect_dialog(ctx: &Context, app: &mut App) {
         }
 
         ConnectionDialogState::SetupConnection => {
-            let dialog = &mut app.connect_dialog;
             egui::Window::new("Server").open(&mut open).show(ctx, |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                     ui.label("Server URL: ");
-                    egui::TextEdit::singleline(&mut dialog.connect_url)
+                    egui::TextEdit::singleline(&mut app.connect_dialog.connect_url)
                         .desired_width(0.0)
                         .clip_text(false)
                         .show(ui);
                     if ui.button("Start").clicked() {
                         let (event_tx, event_rx) = crossbeam::channel::unbounded();
-                        if let Some(provider) = dialog.connect(ui.ctx(), Some(event_tx)) {
-                            let is_open = EnBitVec::repeat(false, 1);
-                            let meta_open = EnBitVec::repeat(false, 1);
-                            app.log_status = LogStatus::Ready(LogState {
-                                file_path: PathBuf::from(&dialog.connect_url),
+                        if let Some(provider) = app.connect_dialog.connect(ui.ctx(), Some(event_tx))
+                        {
+                            let log_status = LogStatus::Ready(LogState {
+                                file_path: PathBuf::from(&app.connect_dialog.connect_url),
                                 trace_provider: Arc::new(RwLock::new(LogProviderImpl::Remote(
                                     provider,
                                 ))),
-                                is_open,
-                                meta_open,
+                                is_open: EnBitVec::repeat(false, 1),
+                                meta_open: EnBitVec::repeat(false, 1),
                                 locating_state: RefCell::new(LocatingState::None),
                                 tree_view: TreeView::new(),
                                 event_rx: Some(event_rx),
+                            });
+                            app.add_tree_tab(Pane::Tree {
+                                name: app.connect_dialog.connect_url.to_string(),
+                                log: log_status,
+                                get_tree_bench: SamplingBenchmark::new("remote", false),
+                                search_state: SearchState::with_autocomplete_enabled(true),
                             });
                         }
                         info!("Connect clicked");

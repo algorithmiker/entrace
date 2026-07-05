@@ -23,7 +23,7 @@ pub struct SearchTextState {
     pub text: String,
     pub autocompleter: Autocompleter,
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub enum Autocompleter {
     #[default]
     Disabled,
@@ -37,7 +37,7 @@ impl Autocompleter {
         }
     }
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct AutocompleteState {
     pub matcher: Option<nucleo_matcher::Matcher>,
     pub autocomplete_results: Vec<(usize, &'static str, u32)>,
@@ -54,8 +54,7 @@ impl AutocompleteState {
             self.cursor_range = Some(range);
         }
 
-        let cursor_index = self.cursor_range.map(|r| r.primary.index).unwrap_or(0);
-
+        let cursor_index = self.cursor_range.map(|r| r.primary.index.0).unwrap_or(0);
         let byte_pos = text.char_indices().nth(cursor_index).map(|(i, _)| i).unwrap_or(text.len());
         let text_to_check = &text[..byte_pos];
         let last_word = get_current_word(text_to_check);
@@ -98,7 +97,7 @@ impl AutocompleteState {
         });
     }
     pub fn accept_selection(&mut self, text: &mut String, selected: usize) {
-        let cursor_index = self.cursor_range.map(|r| r.primary.index).unwrap_or(0);
+        let cursor_index = self.cursor_range.map(|r| r.primary.index.0).unwrap_or(0);
         let byte_cursor_pos =
             text.char_indices().nth(cursor_index).map(|(i, _)| i).unwrap_or(text.len());
         let text_to_check = &text[..byte_cursor_pos];
@@ -117,9 +116,8 @@ impl AutocompleteState {
 
 pub fn bottom_panel_ui(
     ui: &mut Ui, search_state: &mut SearchState, api_docs_state: &mut ApiDocsState,
-    log_state: &LogState, text_field_margin: Margin,
+    log_state: &LogState, text_field_margin: Margin, text_edit_id: Id,
 ) {
-    let text_edit_id = Id::new("bottom-search-text-edit");
     if let Autocompleter::Enabled(ref mut auto) = search_state.text.autocompleter
         && ui.memory(|m| m.has_focus(text_edit_id))
         && !auto.autocomplete_results.is_empty()
