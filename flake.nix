@@ -51,7 +51,7 @@
             cargoCheckExtraArgs = "";
             buildInputs = [ ] ++ rpath-libs;
             nativeBuildInputs = [
-              pkgs.mold-wrapped
+              pkgs.mold
               pkgs.patchelf
               pkgs.pkg-config
             ];
