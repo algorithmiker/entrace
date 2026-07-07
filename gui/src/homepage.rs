@@ -172,6 +172,7 @@ pub fn center(ui: &mut Ui, app: &mut App) {
             demo_mode: app.ephemeral_settings.demo_mode,
             notifier: app.notifier.clone(),
             api_docs_state: &mut app.api_docs_state,
+            open_tree_cnt: &mut app.open_tree_cnt,
         },
         ui,
     );

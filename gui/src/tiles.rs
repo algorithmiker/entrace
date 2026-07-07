@@ -22,6 +22,7 @@ pub struct Behaviour<'a> {
     pub demo_mode: bool,
     pub notifier: NotificationHandle,
     pub api_docs_state: &'a mut ApiDocsState,
+    pub open_tree_cnt: &'a mut u32,
 }
 
 impl<'a> egui_tiles::Behavior<Pane> for Behaviour<'a> {
@@ -65,7 +66,9 @@ impl<'a> egui_tiles::Behavior<Pane> for Behaviour<'a> {
     }
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         SimplificationOptions {
-            all_panes_must_have_tabs: true, // optimally this would be false but I am lazy for now
+            // this is a hack so that if <=1 trace is open, there is
+            // no tab, but otherwise, all panes have tab headers, to make them draggable
+            all_panes_must_have_tabs: *self.open_tree_cnt > 1,
             ..Default::default()
         }
     }
@@ -73,6 +76,15 @@ impl<'a> egui_tiles::Behavior<Pane> for Behaviour<'a> {
     fn is_tab_closable(
         &self, _tiles: &egui_tiles::Tiles<Pane>, _tile_id: egui_tiles::TileId,
     ) -> bool {
+        true
+    }
+    fn on_tab_close(
+        &mut self, tiles: &mut egui_tiles::Tiles<Pane>, tile_id: egui_tiles::TileId,
+    ) -> bool {
+        let Some(Tile::Pane(Pane::Tree { .. })) = tiles.get(tile_id) else {
+            return true;
+        };
+        *self.open_tree_cnt = self.open_tree_cnt.saturating_sub(1);
         true
     }
 }

@@ -56,6 +56,7 @@ pub struct App {
     pub about_state: AboutState,
     pub api_docs_state: ApiDocsState,
     pub tiles: Tree<Pane>,
+    pub open_tree_cnt: u32,
 }
 impl Default for App {
     fn default() -> Self {
@@ -73,6 +74,7 @@ impl Default for App {
             about_state: AboutState::new(),
             api_docs_state: ApiDocsState::default(),
             tiles: Tree::empty("default"),
+            open_tree_cnt: 0,
         }
     }
 }
@@ -175,6 +177,7 @@ impl App {
             get_tree_bench: SamplingBenchmark::new("get_tree", false),
             search_state: SearchState::with_autocomplete_enabled(true),
         });
+        self.open_tree_cnt += 1;
 
         info!("set log status to loading");
         spawn_task(move || {
