@@ -497,6 +497,22 @@ pub fn en_filterset_from_range(lua: &Lua, (start, end): (usize, usize)) -> mlua:
     fs.set("items", items)?;
     Ok(fs)
 }
+#[doc = include_str!("../api-docs/en_filterset_universe.md")]
+pub fn en_filterset_universe(lua: &Lua, range: &RangeInclusive<u32>) -> mlua::Result<Table> {
+    let fs = lua.create_table()?;
+    fs.set("type", "filterset")?;
+    fs.set("root", 0)?;
+
+    let item = lua.create_table()?;
+    item.set("type", "prim_range")?;
+    item.set("start", *range.start())?;
+    item.set("end", *range.end())?;
+
+    let items = lua.create_table()?;
+    items.push(item)?;
+    fs.set("items", items)?;
+    Ok(fs)
+}
 
 // This function can have two parametrizations.
 // The first:
@@ -999,12 +1015,18 @@ pub fn en_join(joinable: Arc<JoinCtx>) -> impl Fn(Table) -> LogProviderResult<Ve
 macro_rules! lua_setup_with_wrappers {
     ($lua: expr, $trace: expr, $finder_cache: expr, $join_ctx: expr, $range: expr, $lua_wrap: ident, $lua_wrap2: ident) => {
         let globals = $lua.globals();
-        let (range2, range3) = ($range.clone(), $range.clone());
-        let en_range = $lua.create_function(move |_state, _: ()| en_span_range(&range2));
-        globals.set("en_span_range", en_range?)?;
+        let (range2, range3, range4) = ($range.clone(), $range.clone(), $range.clone());
+        globals.set(
+            "en_span_range",
+            $lua.create_function(move |_state, _: ()| en_span_range(&range2))?,
+        )?;
+        globals.set(
+            "en_filterset_universe",
+            $lua.create_function(move |lua, _: ()| en_filterset_universe(lua, &range3))?,
+        )?;
         globals.set(
             "en_foreach",
-            $lua.create_function(move |lua: &Lua, f: mlua::Function| en_foreach(lua, &range3, f))?,
+            $lua.create_function(move |lua: &Lua, f: mlua::Function| en_foreach(lua, &range4, f))?,
         )?;
         globals.set("en_log", $lua.create_function(move |_, x| en_log(x))?)?;
         globals.set("en_pretty_table", $lua.create_function(move |_, t| en_pretty_table(t))?)?;
