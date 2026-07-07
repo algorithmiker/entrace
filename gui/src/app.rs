@@ -162,6 +162,7 @@ impl App {
                 self.tiles.tiles.insert(root_id, new_tabs_tile);
             }
         }
+        self.open_tree_cnt += 1;
     }
     pub fn open_file(&mut self, path: impl AsRef<Path> + Send + 'static, ctx: egui::Context) {
         let path_clone = path.as_ref().to_path_buf();
@@ -177,7 +178,6 @@ impl App {
             get_tree_bench: SamplingBenchmark::new("get_tree", false),
             search_state: SearchState::with_autocomplete_enabled(true),
         });
-        self.open_tree_cnt += 1;
 
         info!("set log status to loading");
         spawn_task(move || {
