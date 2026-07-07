@@ -13,6 +13,7 @@ use std::{
     time::Instant,
 };
 
+use crate::filtersets::Relation;
 use crate::{
     QueryError,
     filtersets::{Filterset, Matcher, Predicate, PredicateId},
@@ -333,18 +334,18 @@ pub fn en_foreach(
     Ok(results)
 }
 fn meta_matches(
-    meta: &MetadataRefContainer, target: &str, comparator: Ordering, value: &EnValue,
+    meta: &MetadataRefContainer, target: &str, comparator: Relation, value: &EnValue,
 ) -> anyhow::Result<bool> {
-    fn string_eq(a: &str, value: &EnValue, comparator: std::cmp::Ordering) -> bool {
+    fn string_eq(a: &str, value: &EnValue, comparator: Relation) -> bool {
         match value {
-            EnValue::String(b) => a.cmp(b) == comparator,
+            EnValue::String(b) => comparator.holds_str(a, b),
             _ => false,
         }
     }
-    fn opt_string_eq(a: Option<&str>, value: &EnValue, comparator: Ordering) -> bool {
+    fn opt_string_eq(a: Option<&str>, value: &EnValue, comparator: Relation) -> bool {
         let Some(a) = a else { return false };
         match value {
-            EnValue::String(b) => a.cmp(b) == comparator,
+            EnValue::String(b) => comparator.holds_str(a, b),
             _ => false,
         }
     }
@@ -357,7 +358,7 @@ fn meta_matches(
                 EnValue::I64(x) => *x as u8,
                 _ => return Ok(false),
             };
-            Ok((meta.level as u8).cmp(&asu8) == comparator)
+            Ok(comparator.holds(meta.level as u8, asu8))
         }
         "module_path" => Ok(opt_string_eq(meta.module_path, value, comparator)),
         "file" => Ok(opt_string_eq(meta.file, value, comparator)),
@@ -369,24 +370,24 @@ fn meta_matches(
                 _ => return Ok(false),
             };
             let Some(line) = meta.line else { return Ok(false) };
-            Ok(line.cmp(&converted) == comparator)
+            Ok(comparator.holds(line, converted))
         }
         x => bail!("Bad meta field {x}"),
     }
 }
 /// Returns true if span_value R value
-pub fn values_match(comparator: std::cmp::Ordering, here: &EnValueRef, expected: &EnValue) -> bool {
+pub fn values_match(comparator: Relation, here: &EnValueRef, expected: &EnValue) -> bool {
     match expected {
         EnValue::String(a) => match here {
-            EnValueRef::String(b) => b.cmp(&a.as_str()) == comparator,
+            EnValueRef::String(b) => comparator.holds_str(b, a),
             _ => false,
         },
         EnValue::Bool(a) => match here {
-            EnValueRef::Bool(b) => b.cmp(a) == comparator,
+            EnValueRef::Bool(b) => comparator.holds(b, a),
             _ => false,
         },
         EnValue::Float(a) => match here {
-            EnValueRef::Float(b) => b.total_cmp(a) == comparator,
+            EnValueRef::Float(b) => comparator.holds(b, a),
             _ => false,
         },
         EnValue::U64(a) => {
@@ -397,7 +398,7 @@ pub fn values_match(comparator: std::cmp::Ordering, here: &EnValueRef, expected:
                 EnValueRef::I128(x) => *x as u64,
                 _ => return false,
             };
-            span_value_converted.cmp(a) == comparator
+            comparator.holds(span_value_converted, *a)
         }
         EnValue::I64(a) => {
             let span_value_converted = match here {
@@ -407,7 +408,7 @@ pub fn values_match(comparator: std::cmp::Ordering, here: &EnValueRef, expected:
                 EnValueRef::I128(x) => *x as i64,
                 _ => return false,
             };
-            span_value_converted.cmp(a) == comparator
+            comparator.holds(span_value_converted, *a)
         }
         // we explicitly don't construct these from the lua tables
         EnValue::U128(_) => false,
@@ -417,7 +418,7 @@ pub fn values_match(comparator: std::cmp::Ordering, here: &EnValueRef, expected:
     }
 }
 pub fn span_matches_filter(
-    tcc: &impl LogProvider, id: u32, target: &str, target_is_meta: bool, relation: Ordering,
+    tcc: &impl LogProvider, id: u32, target: &str, target_is_meta: bool, relation: Relation,
     en_value: &EnValue,
 ) -> bool {
     if target_is_meta {
@@ -427,7 +428,7 @@ pub fn span_matches_filter(
         if target == "message"
             && let EnValue::String(expected) = en_value
         {
-            return tcc.message(id).unwrap().is_some_and(|v| v.cmp(expected) == relation);
+            return tcc.message(id).unwrap().is_some_and(|v| relation.holds_str(v, expected));
         }
         let Some(value_here) = tcc.attr_value(id, target).unwrap() else {
             return false;
@@ -804,12 +805,8 @@ fn parse_predicate(t: &Table) -> mlua::Result<Predicate<EnValue>> {
     //     { type = "rel", target = "", relation = "", value = "", src = 0 },
     let attr: String = t.get("target")?;
     let relation: String = t.get("relation")?;
-    let rel = match relation.as_str() {
-        "GT" => Ordering::Greater,
-        "LT" => Ordering::Less,
-        "EQ" => Ordering::Equal,
-        x => return Err(anyhow::anyhow!("Bad filter relation {x}").into_lua_err()),
-    };
+    let rel = Relation::parse(&relation)
+        .ok_or_else(|| anyhow::anyhow!("Bad filter relation `{relation}`").into_lua_err())?;
 
     let value: mlua::Value = t.get("value")?;
     let en_value = match value {
@@ -879,7 +876,7 @@ pub struct EnMatcher<'a, L: LogProvider> {
 pub struct EnPredicate<'a> {
     target: &'a str,
     target_is_meta: bool,
-    rel: Ordering,
+    rel: Relation,
     con: &'a EnValue,
 }
 pub fn predicate_to_en_predicate<'a>(p: &'a Predicate<EnValue>) -> EnPredicate<'a> {

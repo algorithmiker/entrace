@@ -9,14 +9,63 @@ use std::{
 
 pub type FiltersetId = usize;
 pub type PredicateId = usize;
+#[derive(Debug, Copy, Clone)]
+pub enum Relation {
+    LessThan,
+    LessEq,
+    Eq,
+    GreaterEq,
+    GreaterThan,
+    Contains,
+}
+impl Relation {
+    pub fn parse(s: &str) -> Option<Self> {
+        use Relation::*;
+        match s {
+            "LE" | "<=" => Some(LessEq),
+            "LT" | "<" => Some(LessThan),
+            "EQ" | "==" => Some(Eq),
+            "GE" | ">=" => Some(GreaterEq),
+            "GT" | ">" => Some(GreaterThan),
+            "CONTAINS" => Some(Contains),
+            _ => None,
+        }
+    }
+    /// Returns whether aRb.
+    /// Don't use this for strings, use [Relation::holds_str] instead, as that'll handle
+    /// [Relation::Contains] properly.
+    pub fn holds<T: PartialEq + PartialOrd>(&self, a: T, b: T) -> bool {
+        match self {
+            Relation::LessThan => a < b,
+            Relation::LessEq => a <= b,
+            Relation::Eq => a == b,
+            Relation::GreaterEq => a >= b,
+            Relation::GreaterThan => a > b,
+            // we want Relation::Contains to be only on strings anyway
+            Relation::Contains => false,
+        }
+    }
+    /// Returns whether aRb, specialized for strings, so we can check Contains
+    pub fn holds_str(&self, a: &str, b: &str) -> bool {
+        match self {
+            Relation::LessThan => a < b,
+            Relation::LessEq => a <= b,
+            Relation::Eq => a == b,
+            Relation::GreaterEq => a >= b,
+            Relation::GreaterThan => a > b,
+            Relation::Contains => a.contains(b),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Predicate<T> {
     pub attr: String,
-    pub rel: Ordering,
+    pub rel: Relation,
     pub constant: T,
 }
 impl<T> Predicate<T> {
-    pub fn new(attrname: impl ToString, rel: Ordering, constant: T) -> Self {
+    pub fn new(attrname: impl ToString, rel: Relation, constant: T) -> Self {
         Self { attr: attrname.to_string(), rel, constant }
     }
 }
