@@ -207,6 +207,7 @@ pub fn parse_entrace_magic(magic: &[u8; 10]) -> Result<(u8, StorageFormat), Magi
     if &magic[1..8] != b"ENTRACE" {
         return Err(MagicParseError::AppNameMismatch);
     }
+    // magic[8] is version, magic[9] is format
     let s = match magic[9] {
         0 => StorageFormat::ET,
         1 => StorageFormat::IET,
@@ -306,7 +307,7 @@ pub fn display_error_context(mut err: &dyn std::error::Error) -> String {
     let mut idx = 0;
 
     while let Some(source) = err.source() {
-        write!(s, "  {idx}: {source}").ok();
+        writeln!(s, "  {idx}: {source}").ok();
         err = source;
         idx += 1;
     }
