@@ -1468,7 +1468,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "entrace_example"
+name = "entrace_examplegen"
 version = "0.1.2"
 dependencies = [
  "bincode",
@@ -1672,6 +1672,15 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "example"
+version = "0.1.0"
+dependencies = [
+ "entrace_core",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

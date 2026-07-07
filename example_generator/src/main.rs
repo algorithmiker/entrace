@@ -10,7 +10,7 @@ use petgraph::{
 };
 use std::{
     fmt::Display,
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     net::TcpStream,
     sync::Arc,
     thread::{self, sleep},
