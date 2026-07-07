@@ -1,5 +1,5 @@
 use egui::{Id, Margin};
-use egui_tiles::SimplificationOptions;
+use egui_tiles::{SimplificationOptions, Tile};
 
 use crate::{
     ApiDocsState, LogStatus,
@@ -17,6 +17,13 @@ pub enum Pane {
         get_tree_bench: SamplingBenchmark<1>,
         search_state: SearchState,
     },
+}
+impl std::fmt::Debug for Pane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Pane::Tree { name, .. } => write!(f, "Pane({name})"),
+        }
+    }
 }
 pub struct Behaviour<'a> {
     pub demo_mode: bool,
