@@ -13,7 +13,7 @@ fn get_hello_et() -> Vec<u8> {
     let tmp_buf = Cursor::new(vec![]);
     let finish_val = storage.finish(tmp_buf).unwrap();
 
-    let out_buf = finish_val.temp_buf.unwrap();
+    let out_buf = finish_val.final_buf.unwrap();
     out_buf.into_inner()
 }
 

@@ -1,11 +1,8 @@
 use croaring::Bitmap as Roaring;
 use itertools::Itertools;
 use std::collections::HashMap;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::{Debug, Write};
-use std::{
-    cmp::Ordering,
-    collections::{HashSet, VecDeque},
-};
 
 pub type FiltersetId = usize;
 pub type PredicateId = usize;

@@ -12,87 +12,52 @@
 
  ENTRACE is provided at no cost and without warranty.
 
- ## Adding ENTRACE to your library
- To start recording traces with entrace, you first need to add [tracing_subscriber] to your
- dependencies.
+## Adding ENTRACE to your library
+To start recording traces with entrace, you first need to add [tracing_subscriber] to your
+dependencies.
 
- `entrace_core` provides a [TreeLayer], which is a [tracing_subscriber::Layer].
+`entrace_core` provides a [TreeLayer], which is a [tracing_subscriber::Layer].
 
- ### Producing IET files
- ```rust,ignore
- use entrace_core::{TreeLayer, remote::IETStorage, remote::IETStorageConfig};
- use std::{sync::Arc, fs::OpenOptions};
- use tracing::{info, level_filters::LevelFilter};
- use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
+### Producing IET files
+ ```rust
+use entrace_core::IETBuilder;
+use tracing::{info, level_filters::LevelFilter};
+use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
- let file = OpenOptions::new()
-     .write(true)
-     .create(true)
-     .open("my_program.iet")
-     .unwrap();
- let storage = Arc::new(IETStorage::init(IETStorageConfig::non_length_prefixed(file)));
- let tree_layer = TreeLayer::from_storage(storage.clone());
- Registry::default().with(LevelFilter::TRACE).with(tree_layer).init();
- info!(target = "World", "Hello");
+fn main() {
+    let (layer, _guard) = IETBuilder::from_file("hello.iet").unwrap().build().unwrap();
+    Registry::default().with(LevelFilter::TRACE).with(layer).init();
 
- // ...
-
- // save the trace when you shut down the process
- storage.finish();
+    info!(target = "World", "Hello");
+}
  ```
 
- ### Producing ET files
- ```rust,ignore
- use entrace_core::{TreeLayer, mmap::ETStorage};
- use std::{sync::Arc, fs::OpenOptions};
- use tracing::{info, level_filters::LevelFilter};
- use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
+### Producing ET files
+ ```rust
+use entrace_core::ETBuilder;
+use tracing::{info, level_filters::LevelFilter};
+use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
- let file = OpenOptions::new()
-     .write(true)
-     .create(true)
-     .truncate(true)
-     .open("my_program.et")
-     .unwrap();
- let storage = Arc::new(ETStorage::init(file));
- let tree_layer = TreeLayer::from_storage(storage.clone());
- Registry::default().with(LevelFilter::TRACE).with(tree_layer).init();
- info!(target = "World", "Hello");
+fn main() {
+    let (layer, _guard) = ETBuilder::from_file("hello.et").unwrap().build().unwrap();
+    Registry::default().with(LevelFilter::TRACE).with(layer).init();
 
- // ...
-
- // ETStorage initially writes an appendable .iet file, then converts it to .et and writes it to
- // the provided temporary file.
- // Here we perform an atomic swap of the two files, but you could also utilize an in-memory
- // buffer for this.
- let temp_file = OpenOptions::new()
-     .write(true)
-     .create(true)
-     .truncate(true)
-     .open("my_program.tmp")
-     .unwrap();
- storage.finish(temp_file);
- std::fs::rename("my_program.tmp", "my_program.et").unwrap();
+    info!(target = "World", "Hello");
+}
  ```
 
- ### Remote tracing
- To perform remote tracing, you just need to give a [std::net::TcpStream] to [remote::IETStorage].
+### Remote tracing
  ```rust,ignore
- use entrace_core::{TreeLayer, remote::IETStorage, remote::IETStorageConfig};
- use std::{sync::Arc, fs::OpenOptions, net::TcpStream};
- use tracing::{info, level_filters::LevelFilter};
- use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
+use entrace_core::IETBuilder;
+use tracing::{info, level_filters::LevelFilter};
+use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
- let tcp_stream = TcpStream::connect("localhost:3000").unwrap();
- let storage = Arc::new(IETStorage::init(IETStorageConfig::length_prefixed(tcp_stream)));
- let tree_layer = TreeLayer::from_storage(storage.clone());
- Registry::default().with(LevelFilter::TRACE).with(tree_layer).init();
- info!(target = "World", "Hello");
+fn main() {
+    let (layer, _guard) = IETBuilder::connect("localhost:8080").unwrap().build().unwrap();
+    Registry::default().with(LevelFilter::TRACE).with(layer).init();
 
- // ...
-
- // save the trace when you shut down the process
- storage.finish();
+    info!(target = "World", "Hello");
+}
  ```
 
 ## Reading traces

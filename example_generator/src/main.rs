@@ -1,18 +1,12 @@
 use clap::{Parser, ValueEnum};
-use entrace_core::{
-    mmap::ETStorage,
-    remote::{IETStorage, IETStorageConfig},
-    TreeLayer,
-};
+use entrace_core::{ETBuilder, IETBuilder};
 use petgraph::{
     graph::{DiGraph, NodeIndex},
     Direction,
 };
 use std::{
+    any::Any,
     fmt::Display,
-    fs::{File, OpenOptions},
-    net::TcpStream,
-    sync::Arc,
     thread::{self, sleep},
     time::{Duration, Instant},
 };
@@ -215,8 +209,8 @@ pub struct Args {
     pub log_mode: LogMode,
     pub work: Work,
 }
-
-fn setup_tracing(args: &Args) -> Box<dyn FnOnce(&Args)> {
+/// returns the tracing guard.
+fn setup_tracing(args: &Args) -> Box<dyn Any> {
     let log_filename = match args.log_file.as_ref() {
         Some(x) => x.as_str(),
         None => match args.log_mode {
@@ -225,47 +219,22 @@ fn setup_tracing(args: &Args) -> Box<dyn FnOnce(&Args)> {
             LogMode::StreamingET => "localhost:8000",
         },
     };
-    pub fn getf(filename: &str) -> std::io::Result<std::fs::File> {
-        OpenOptions::new().truncate(true).create(true).write(true).read(true).open(filename)
-    }
 
     match args.log_mode {
         LogMode::DiskET => {
-            let file = getf(log_filename).unwrap();
-            let storage = Arc::new(ETStorage::init(file));
-            let tree_layer = TreeLayer::from_storage(storage.clone());
-            Registry::default().with(LevelFilter::TRACE).with(tree_layer).init();
-            let l_fn2 = log_filename.to_string();
-            Box::new(move |_args| {
-                let temporary_file = OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .read(true)
-                    .truncate(true)
-                    .open("entrace.log.tmp")
-                    .unwrap();
-
-                storage.finish(temporary_file).unwrap();
-                std::fs::rename("entrace.log.tmp", l_fn2).unwrap();
-            })
+            let (layer, guard) = ETBuilder::from_file(log_filename).unwrap().build().unwrap();
+            Registry::default().with(LevelFilter::TRACE).with(layer).init();
+            Box::new(guard)
         }
         LogMode::DiskIET => {
-            let file = getf(log_filename).unwrap();
-            let storage = Arc::new(IETStorage::init(IETStorageConfig::non_length_prefixed(file)));
-            let tree_layer = TreeLayer::from_storage(storage.clone());
-            Registry::default().with(LevelFilter::TRACE).with(tree_layer).init();
-            Box::new(move |_args| {
-                storage.finish().unwrap();
-            })
+            let (layer, guard) = IETBuilder::from_file(log_filename).unwrap().build().unwrap();
+            Registry::default().with(LevelFilter::TRACE).with(layer).init();
+            Box::new(guard)
         }
         LogMode::StreamingET => {
-            let tcp_stream = TcpStream::connect(log_filename).unwrap();
-            let storage = Arc::new(IETStorage::init(IETStorageConfig::length_prefixed(tcp_stream)));
-            let tree_layer = TreeLayer::from_storage(storage.clone());
-            Registry::default().with(LevelFilter::TRACE).with(tree_layer).init();
-            Box::new(move |_args| {
-                storage.finish().unwrap();
-            })
+            let (layer, guard) = IETBuilder::connect(log_filename).unwrap().build().unwrap();
+            Registry::default().with(LevelFilter::TRACE).with(layer).init();
+            Box::new(guard)
         }
     }
 }
@@ -287,9 +256,8 @@ fn main() {
     //    .with_line_number(true)
     //    .with_writer(non_blocking_writer);
 
-    let finish_callback = setup_tracing(&args);
+    let _guard = setup_tracing(&args);
     let start = std::time::Instant::now();
     work(&args);
     println!("Work, WITH tracing, took {:?}", start.elapsed());
-    finish_callback(&args);
 }

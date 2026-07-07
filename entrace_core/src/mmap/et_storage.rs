@@ -43,20 +43,23 @@ pub enum ETStorageError<T: FileLike> {
 pub trait FileLike: Read + Write + Seek {}
 impl<T: Read + Write + Seek> FileLike for T {}
 pub type ETResult<A, T> = Result<A, ETStorageError<T>>;
-pub struct ETStorage<T: FileLike, Q: FileLike + Send> {
-    pub sender: crossbeam_channel::Sender<Message<Q>>,
-    pub thread_handle: RwLock<Option<JoinHandle<ETResult<ETShutdownValue<T, Q>, T>>>>,
+/// ET Storage layer.
+/// Works by writing to a temporary IET buffer initially, then writing to an ET buffer provided by
+/// .finish()
+pub struct ETStorage<Temp: FileLike, Final: FileLike + Send> {
+    pub sender: crossbeam_channel::Sender<Message<Final>>,
+    pub thread_handle: RwLock<Option<JoinHandle<ETResult<ETShutdownValue<Temp, Final>, Temp>>>>,
 }
-impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q> {
-    pub fn init(mut file: T) -> Self
+impl<Temp: FileLike + Send + 'static, Final: FileLike + Send + 'static> ETStorage<Temp, Final> {
+    pub fn init(mut temporary_buf: Temp) -> Self
     where
         Self: std::marker::Sized,
     {
-        let (tx, rx) = crossbeam_channel::unbounded::<Message<Q>>();
+        let (tx, rx) = crossbeam_channel::unbounded::<Message<Final>>();
         let thread_handle = std::thread::spawn(move || {
             let magic = entrace_magic_for(EN_DISK_VERSION, crate::StorageFormat::IET);
-            file.write_all(&magic).unwrap();
-            let mut writer = BufWriter::new(&mut file);
+            temporary_buf.write_all(&magic).unwrap();
+            let mut writer = BufWriter::new(&mut temporary_buf);
             // Offsets relative to the start of the data section
             let mut offsets = vec![0u64];
             let mut child_lists = vec![PoolEntry::new()];
@@ -93,40 +96,42 @@ impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> ETStorage<T, Q>
                             next_id += 1;
                         }
                     }
-                    Message::Shutdown(mut tmp_buf) => {
-                        let mut tmp_buf_writer = BufWriter::new(&mut tmp_buf);
+                    Message::Shutdown(mut final_buf) => {
+                        let mut final_buf_writer = BufWriter::new(&mut final_buf);
                         let table_data = IETTableDataRef::new(&offsets, &child_lists);
                         writer.flush().ok();
                         drop(writer);
-                        let mut old_reader = BufReader::new(&mut file);
+                        let mut old_reader = BufReader::new(&mut temporary_buf);
                         if let Err(y) = convert::iet_to_et_with_table(
                             &table_data,
                             &mut old_reader,
-                            &mut tmp_buf_writer,
+                            &mut final_buf_writer,
                             true,
                         ) {
-                            return Err(ETStorageError::Convert { error: y, buf: file });
+                            return Err(ETStorageError::Convert { error: y, buf: temporary_buf });
                         }
 
-                        tmp_buf_writer.flush().ok();
-                        drop(tmp_buf_writer);
+                        final_buf_writer.flush().ok();
+                        drop(final_buf_writer);
                         drop(old_reader);
                         return Ok(ETShutdownValue {
-                            temp_buf: Some(tmp_buf),
-                            iet_buf: Some(file),
+                            final_buf: Some(final_buf),
+                            temp_iet_buf: Some(temporary_buf),
                         });
                     }
                 }
             }
-            Ok(ETShutdownValue { temp_buf: None, iet_buf: None })
+            Ok(ETShutdownValue { final_buf: None, temp_iet_buf: None })
         });
 
         Self { sender: tx, thread_handle: RwLock::new(Some(thread_handle)) }
     }
 
-    pub fn finish(&self, param: Q) -> Result<ETShutdownValue<T, Q>, ETStorageError<T>> {
+    pub fn finish(
+        &self, final_buf: Final,
+    ) -> Result<ETShutdownValue<Temp, Final>, ETStorageError<Temp>> {
         use ETStorageError::*;
-        self.sender.send(Message::Shutdown(param)).map_err(|_| ShutdownSend)?;
+        self.sender.send(Message::Shutdown(final_buf)).map_err(|_| ShutdownSend)?;
         let mut thread_handle = self.thread_handle.write().map_err(|_| Poisoned)?;
         let thread_handle = std::mem::take(&mut *thread_handle).ok_or(NoHandle)?;
         thread_handle.join().map_err(ThreadJoin)?

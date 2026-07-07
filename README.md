@@ -45,37 +45,50 @@ In addition, ENTRACE allows **remote tracing over TCP**.
 For more information, see [file-formats.md](./docs/file-formats.md)
 
 ## Usage
-### As a library
+### Using the library
 `entrace_core` provides a plug-and-play layer for `tracing_subscriber`.
 Short example:
 
 ```rust
-use entrace_core::{layer::TreeLayer, mmap::IETStorage};
-use std::sync::Arc;
+use entrace_core::IETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn main() {
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open("my_program.iet")
-        .unwrap();
-    let storage = Arc::new(IETStorage::init(file));
-    let tree_layer = TreeLayer::from_storage(storage.clone());
-    Registry::default()
-        .with(LevelFilter::TRACE)
-        .with(tree_layer)
-        .init();
+    let (layer, _guard) = IETBuilder::from_file("hello.iet").unwrap().build().unwrap();
+    Registry::default().with(LevelFilter::TRACE).with(layer).init();
+
     info!(target = "World", "Hello");
-
-    // ...
-
-    // save the trace when you shut down the process
-    storage.finish();
 }
 ```
 
+Or, for tracing in the ET format:
+```rust
+use entrace_core::ETBuilder;
+use tracing::{info, level_filters::LevelFilter};
+use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
+
+fn main() {
+    let (layer, _guard) = ETBuilder::from_file("hello.et").unwrap().build().unwrap();
+    Registry::default().with(LevelFilter::TRACE).with(layer).init();
+
+    info!(target = "World", "Hello");
+}
+```
+
+Or, for remote tracing:
+```rust,ignore
+use entrace_core::ETBuilder;
+use tracing::{info, level_filters::LevelFilter};
+use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
+
+fn main() {
+    let (layer, _guard) = ETBuilder::connect("localhost:8080").unwrap().build().unwrap();
+    Registry::default().with(LevelFilter::TRACE).with(layer).init();
+
+    info!(target = "World", "Hello");
+}
+```
 For more information, consult the [entrace_core docs](./docs/usage-library.md).
 
 ### Using the GUI

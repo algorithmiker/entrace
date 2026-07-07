@@ -1,7 +1,6 @@
 use std::fmt::Write;
 use std::{
     cell::RefCell,
-    cmp::Ordering,
     collections::HashMap,
     error::Error,
     ops::RangeInclusive,

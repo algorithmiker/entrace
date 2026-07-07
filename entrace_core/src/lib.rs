@@ -15,6 +15,8 @@ mod entry;
 pub use entry::*;
 mod log_provider;
 pub use log_provider::*;
+mod builder;
+pub use builder::*;
 pub mod mmap;
 pub mod remote;
 pub mod storage;

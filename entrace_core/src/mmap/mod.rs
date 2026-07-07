@@ -25,6 +25,6 @@ pub trait FileLike: Read + Write + Seek {}
 impl<T: Read + Write + Seek> FileLike for T {}
 
 pub struct ETShutdownValue<T: FileLike, Q: FileLike> {
-    pub temp_buf: Option<Q>,
-    pub iet_buf: Option<T>,
+    pub final_buf: Option<Q>,
+    pub temp_iet_buf: Option<T>,
 }
