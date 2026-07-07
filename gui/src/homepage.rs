@@ -7,7 +7,7 @@ use crate::{
     tiles::Behaviour,
     tree::{TreeContextMut, tree_view},
 };
-use egui::{CollapsingHeader, Color32, Response, RichText, ScrollArea, Ui, vec2};
+use egui::{CentralPanel, CollapsingHeader, Color32, Response, RichText, ScrollArea, Ui, vec2};
 use entrace_core::{LogProvider, LogProviderImpl, display_error_context};
 use std::{
     cell::RefCell,
@@ -167,15 +167,20 @@ pub fn span(
 }
 
 pub fn center(ui: &mut Ui, app: &mut App) {
-    app.tiles.ui(
-        &mut Behaviour {
-            demo_mode: app.ephemeral_settings.demo_mode,
-            notifier: app.notifier.clone(),
-            api_docs_state: &mut app.api_docs_state,
-            open_tree_cnt: &mut app.open_tree_cnt,
-        },
-        ui,
-    );
+    if app.open_tree_cnt > 0 {
+        app.tiles.ui(
+            &mut Behaviour {
+                demo_mode: app.ephemeral_settings.demo_mode,
+                notifier: app.notifier.clone(),
+                api_docs_state: &mut app.api_docs_state,
+                open_tree_cnt: &mut app.open_tree_cnt,
+            },
+            ui,
+        );
+    } else {
+        CentralPanel::default()
+            .show(ui, |ui| ui.label("No file opened. Open one via File -> Open"));
+    }
 }
 pub fn paint_log(
     ui: &mut Ui, log_status: &mut LogStatus, demo_mode: bool, notifier: &NotificationHandle,

@@ -160,12 +160,11 @@ pub fn bottom_panel_ui(
         .code_editor();
 
     let search_response = ui.add_sized(ui.available_size(), text_edit);
-
     if let Autocompleter::Enabled(ref auto) = search_state.text.autocompleter
         && !auto.autocomplete_results.is_empty()
         && search_response.has_focus()
     {
-        let popup_id = Id::new("bottom-search-autocomplete-popup");
+        let popup_id = Id::new("bottom-search-autocomplete-popup").with(text_edit_id);
         let mut pos = search_response.rect.left_top();
         pos.y -= 4.0;
 
@@ -212,15 +211,15 @@ pub fn bottom_panel_ui(
         search_state.new_query(log_state.trace_provider.clone());
     }
 
-    let avail = ui.ctx().content_rect();
     let resize_width = ui.style().visuals.widgets.noninteractive.fg_stroke.width;
     let total_top_padding = resize_width + text_field_margin.topf();
     let search_rect = search_response.rect;
     let search_rect = search_rect.with_min_y(search_rect.min.y - total_top_padding);
 
+    let right_x = search_rect.max.x + ui.style().spacing.item_spacing.x;
     let icon_size = 20.0;
-    let rect_top_left = pos2(avail.max.x - (3.0 * icon_size), search_rect.min.y);
-    let rect_bottom_right = pos2(avail.max.x, search_rect.min.y + icon_size);
+    let rect_top_left = pos2(right_x - (3.0 * icon_size), search_rect.min.y);
+    let rect_bottom_right = pos2(right_x, search_rect.min.y + icon_size);
     let rect2 = rect![rect_top_left, rect_bottom_right];
     let bg_corner_radius = CornerRadius { nw: 0, ne: 0, sw: 2, se: 0 };
     let color = match ui.ctx().theme() {
