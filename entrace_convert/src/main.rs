@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::Parser;
-use entrace_core::{EN_DISK_VERSION, convert};
+use entrace::{EN_DISK_VERSION, convert};
 use fs_err::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read};
 #[derive(clap::Parser)]
@@ -36,10 +36,10 @@ pub enum StorageFormat {
     IET = 1,
 }
 impl StorageFormat {
-    pub fn from_entrace(format: entrace_core::StorageFormat) -> anyhow::Result<Self> {
+    pub fn from_entrace(format: entrace::StorageFormat) -> anyhow::Result<Self> {
         match format {
-            entrace_core::StorageFormat::ET => Ok(StorageFormat::ET),
-            entrace_core::StorageFormat::IET => Ok(StorageFormat::IET),
+            entrace::StorageFormat::ET => Ok(StorageFormat::ET),
+            entrace::StorageFormat::IET => Ok(StorageFormat::IET),
             _ => Err(anyhow::anyhow!("Unsupported input format: {:?}", format)),
         }
     }
@@ -66,7 +66,7 @@ fn main() -> anyhow::Result<()> {
             let mut magic_buf = [0; 10];
             reader.read_exact(&mut magic_buf).context("failed to read magic")?;
             let (in_version, format) =
-                entrace_core::parse_entrace_magic(&magic_buf).context("failed to parse magic")?;
+                entrace::parse_entrace_magic(&magic_buf).context("failed to parse magic")?;
             let format = StorageFormat::from_entrace(format)?;
             let out_format = convert_args.out_format;
 

@@ -1,4 +1,4 @@
-use entrace_core::IETBuilder;
+use entrace::IETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 

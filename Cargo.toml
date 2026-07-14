@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["bench", "entrace_convert", "entrace_core", "entrace_query", "entrace_script","example", "example_generator", "gui" ]
+members = ["bench", "entrace_convert", "entrace_core", "entrace_query", "entrace_script", "example", "example_generator", "gui" ]
 
 [profile.profiling]
 inherits = 'release'

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-entrace_core = { path='../entrace_core', default-features=false}
+entrace = { path='../entrace_core', default-features=false}
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 

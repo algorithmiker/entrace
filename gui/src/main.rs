@@ -1,5 +1,5 @@
 use egui::{Color32, FontId, TextStyle, Theme, Ui};
-use entrace_core::{LevelContainer, LogProviderImpl};
+use entrace::{LevelContainer, LogProviderImpl};
 use mimalloc::MiMalloc;
 use std::{
     sync::{Arc, RwLockReadGuard},

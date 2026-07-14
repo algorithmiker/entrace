@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use entrace_core::{
+use entrace::{
     LogProvider, LogProviderImpl, display_error_context,
     remote::{IETEvent, Notify, NotifyExt},
 };

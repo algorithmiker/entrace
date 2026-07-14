@@ -5,7 +5,7 @@ use crate::{
     search::{Query, QueryError, QueryResult, QueryTiming, SearchState, search_settings_dialog},
 };
 use egui::{Layout, ScrollArea, Ui, Widget};
-use entrace_core::display_error_context;
+use entrace::display_error_context;
 use std::{cmp::min, fmt::Write, ops::Range};
 use tracing::{error, info};
 

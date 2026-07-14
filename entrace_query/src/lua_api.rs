@@ -20,13 +20,13 @@ use crate::{
 };
 use anyhow::bail;
 use croaring::Bitmap as Roaring;
-use entrace_core::{
+use entrace::{
     EnValue, EnValueRef, LevelContainer, LogProvider, LogProviderError, LogProviderImpl,
     LogProviderResult, MetadataRefContainer,
 };
 use memchr::memmem::Finder;
 use mlua::{ExternalError, IntoLua, Lua, MultiValue, Table, Value};
-fn level_to_u8(level: &entrace_core::LevelContainer) -> u8 {
+fn level_to_u8(level: &entrace::LevelContainer) -> u8 {
     match level {
         LevelContainer::Trace => 1,
         LevelContainer::Debug => 2,

@@ -13,7 +13,7 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 use egui_tiles::{Container, Tabs, Tile, Tree};
-use entrace_core::{
+use entrace::{
     IETLoadConfig, IETPresentationConfig, LoadConfig, LogProvider,
     remote::{FileWatchConfig, NotifyExt},
 };
@@ -191,7 +191,7 @@ impl App {
                 },
             };
             let trace = time_print("loading trace", || unsafe {
-                entrace_core::load_trace(path.as_ref(), load_config)
+                entrace::load_trace(path.as_ref(), load_config)
             });
             match trace {
                 Ok(x) => {

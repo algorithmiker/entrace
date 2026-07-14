@@ -1442,18 +1442,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
-name = "entrace_convert"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "entrace_core",
- "fs-err",
-]
-
-[[package]]
-name = "entrace_core"
-version = "0.2.0"
+name = "entrace"
+version = "0.3.0"
 dependencies = [
  "bincode",
  "crossbeam-channel",
@@ -1468,12 +1458,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "entrace_convert"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "entrace",
+ "fs-err",
+]
+
+[[package]]
 name = "entrace_examplegen"
 version = "0.1.2"
 dependencies = [
  "bincode",
  "clap",
- "entrace_core",
+ "entrace",
  "petgraph",
  "serde",
  "tracing",
@@ -1498,7 +1498,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_tiles",
- "entrace_core",
+ "entrace",
  "entrace_query",
  "memchr",
  "mimalloc",
@@ -1519,7 +1519,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "croaring",
- "entrace_core",
+ "entrace",
  "itertools",
  "memchr",
  "mlua",
@@ -1533,7 +1533,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
- "entrace_core",
+ "entrace",
  "entrace_query",
  "mlua",
 ]
@@ -1678,7 +1678,7 @@ dependencies = [
 name = "example"
 version = "0.1.0"
 dependencies = [
- "entrace_core",
+ "entrace",
  "tracing",
  "tracing-subscriber",
 ]

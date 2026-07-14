@@ -1,6 +1,6 @@
 use std::{io::Cursor, sync::Arc};
 
-use entrace_core::{TreeLayer, mmap::ETStorage};
+use entrace::{TreeLayer, mmap::ETStorage};
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -25,14 +25,14 @@ fn test_et_iet_et() {
 
     let mut c1_in = Cursor::new(hello_ht);
     let mut c1_out = Cursor::new(vec![]);
-    entrace_core::convert::et_to_iet(&mut c1_in, &mut c1_out, true).unwrap();
+    entrace::convert::et_to_iet(&mut c1_in, &mut c1_out, true).unwrap();
 
     let hello_iht = c1_out.into_inner();
     println!("hello_iht = {hello_iht:?}, len={}", hello_iht.len());
 
     let mut c2_in = Cursor::new(hello_iht);
     let mut c2_out = Cursor::new(vec![]);
-    entrace_core::convert::iet_to_et(&mut c2_in, &mut c2_out, true, false).unwrap();
+    entrace::convert::iet_to_et(&mut c2_in, &mut c2_out, true, false).unwrap();
 
     pretty_assertions::assert_eq!(hello_ht_orig, c2_out.into_inner());
 }

@@ -1,4 +1,4 @@
-use entrace_core::{EnValue, EnValueRef};
+use entrace::{EnValue, EnValueRef};
 
 pub struct LuaValue(pub EnValue);
 pub struct LuaValueRef<'a>(pub EnValueRef<'a>);

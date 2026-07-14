@@ -3,10 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use entrace_core::{
-    TreeLayer,
-    remote::{IETStorage, IETStorageConfig},
-};
+use entrace::{IETBuilder, remote::IETStorageSink};
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -27,11 +24,11 @@ fn test_iet_et_iet() {
 
     let mut c1_in = Cursor::new(hello_iht);
     let mut c1_out = Cursor::new(vec![]);
-    entrace_core::convert::iet_to_et(&mut c1_in, &mut c1_out, true, false).unwrap();
+    entrace::convert::iet_to_et(&mut c1_in, &mut c1_out, true, false).unwrap();
 
     c1_out.rewind().unwrap();
     let mut c2_out = Cursor::new(vec![]);
-    entrace_core::convert::et_to_iet(&mut c1_out, &mut c2_out, true).unwrap();
+    entrace::convert::et_to_iet(&mut c1_out, &mut c2_out, true).unwrap();
     let hello_iht = c2_out.into_inner();
 
     pretty_assertions::assert_eq!(hello_iht_orig, hello_iht);

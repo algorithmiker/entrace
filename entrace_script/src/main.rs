@@ -1,8 +1,8 @@
-use entrace_core::LogProvider;
+use entrace::LogProvider;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
 use clap::Parser;
-use entrace_core::{IETLoadConfig, IETPresentationConfig, remote::FileWatchConfig};
+use entrace::{IETLoadConfig, IETPresentationConfig, remote::FileWatchConfig};
 use entrace_query::lua_api::{JoinCtx, LuaEvalState};
 
 #[derive(Parser)]
@@ -17,9 +17,9 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let Args { lua_file, trace_file } = Args::parse();
     let trace = unsafe {
-        entrace_core::load_trace(
+        entrace::load_trace(
             &trace_file,
-            entrace_core::LoadConfig {
+            entrace::LoadConfig {
                 iht: IETLoadConfig {
                     watch: FileWatchConfig::DontWatch,
                     presentation: IETPresentationConfig::default(),

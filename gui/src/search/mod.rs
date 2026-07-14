@@ -16,7 +16,7 @@ use crate::{search::query_window::PaginatedResults, spawn_task};
 use crossbeam::channel::Receiver;
 use egui::{Pos2, Rect};
 
-use entrace_core::{LogProvider, LogProviderError, LogProviderImpl};
+use entrace::{LogProvider, LogProviderError, LogProviderImpl};
 use entrace_query::{
     QueryError,
     lua_api::{self, EnMatcher, JoinCtx, LuaEvalState, setup_lua_on_arc_rwlock},

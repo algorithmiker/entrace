@@ -6,7 +6,7 @@ use std::{
 };
 
 use egui::Context;
-use entrace_core::{
+use entrace::{
     IETPresentationConfig, LogProviderImpl,
     remote::{IETEvent, RemoteLogProvider},
 };

@@ -1,4 +1,4 @@
-use entrace_core::{TreeLayer, mmap::ETStorage};
+use entrace::{TreeLayer, mmap::ETStorage};
 use std::io::Cursor;
 use std::sync::{
     Arc,

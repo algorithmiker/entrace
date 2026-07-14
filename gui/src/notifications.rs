@@ -8,7 +8,7 @@ use egui::{
     Color32, FontId, Pos2, Rect, Sense, Stroke, TextStyle, UiBuilder, Vec2, epaint::RectShape,
     pos2, vec2,
 };
-use entrace_core::{
+use entrace::{
     LevelContainer,
     remote::{Notify, Refresh},
 };

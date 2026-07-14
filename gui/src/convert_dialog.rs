@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, bail};
 use crossbeam::channel::Receiver;
 use egui::RichText;
-use entrace_core::{convert::ConvertError, display_error_context};
+use entrace::{convert::ConvertError, display_error_context};
 use rfd::FileDialog;
 use tracing::{trace, warn};
 
@@ -242,7 +242,7 @@ pub fn dispatch_convert(
                     }
                 };
                 let r = time_print("ht_to_iht", || {
-                    entrace_core::convert::et_to_iet(&mut in_reader, &mut out_writer, true)
+                    entrace::convert::et_to_iet(&mut in_reader, &mut out_writer, true)
                 })
                 .and_then(|_| out_writer.flush().map_err(ConvertError::OutWriteError));
                 tx.send((start.elapsed(), r)).ok();
@@ -261,7 +261,7 @@ pub fn dispatch_convert(
                     }
                 };
                 let r = time_print("iht_to_ht", || {
-                    entrace_core::convert::iet_to_et(&mut in_reader, &mut out_writer, true, false)
+                    entrace::convert::iet_to_et(&mut in_reader, &mut out_writer, true, false)
                 })
                 .and_then(|_| out_writer.flush().map_err(ConvertError::OutWriteError));
                 tx.send((start.elapsed(), r)).ok();

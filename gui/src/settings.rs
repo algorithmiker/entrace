@@ -5,7 +5,7 @@ use egui::{
     Color32, Context, DragValue, InnerResponse, Margin, RichText, TextStyle, ThemePreference, Ui,
     epaint::FontColorTransferFunction, pos2, vec2,
 };
-use entrace_core::remote::{NotifyExt, Refresh};
+use entrace::remote::{NotifyExt, Refresh};
 use notify::{RecommendedWatcher, Watcher};
 use std::{
     cell::LazyCell,

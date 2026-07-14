@@ -5,7 +5,7 @@ use std::{
 };
 
 use egui::{Color32, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2};
-use entrace_core::{LogProvider, MetadataRefContainer, display_error_context};
+use entrace::{LogProvider, MetadataRefContainer, display_error_context};
 use tracing::{debug, info, warn};
 
 use crate::{

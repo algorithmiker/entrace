@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use croaring::Bitmap as Roaring;
-use entrace_core::EnValue;
+use entrace::EnValue;
 use entrace_query::filtersets::{Evaluator, Filterset, Predicate, Relation};
 fn main() {
     // Motivating example: filter people with (180<height<195 and 75<weight<90) or (iq == 120)

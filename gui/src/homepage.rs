@@ -8,7 +8,7 @@ use crate::{
     tree::{TreeContextMut, tree_view},
 };
 use egui::{CentralPanel, CollapsingHeader, Color32, Response, RichText, ScrollArea, Ui, vec2};
-use entrace_core::{LogProvider, LogProviderImpl, display_error_context};
+use entrace::{LogProvider, LogProviderImpl, display_error_context};
 use std::{
     cell::RefCell,
     sync::{Arc, RwLock},

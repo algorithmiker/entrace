@@ -1,5 +1,5 @@
 use clap::{Parser, ValueEnum};
-use entrace_core::{ETBuilder, IETBuilder};
+use entrace::{ETBuilder, IETBuilder};
 use petgraph::{
     graph::{DiGraph, NodeIndex},
     Direction,
