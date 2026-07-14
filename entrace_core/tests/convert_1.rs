@@ -1,17 +1,14 @@
-use std::{
-    io::{Cursor, Seek},
-    sync::Arc,
-};
+use std::io::{Cursor, Seek};
 
-use entrace::{IETBuilder, remote::IETStorageSink};
+use entrace::IETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn get_hello_iet() -> Vec<u8> {
     let buf = vec![];
-    let storage = Arc::new(IETStorage::init(IETStorageConfig::non_length_prefixed(buf)));
-    let tree_layer = TreeLayer::from_storage(storage.clone());
-    Registry::default().with(LevelFilter::TRACE).with(tree_layer).init();
+    let (layer, _guard) = IETBuilder::new(buf).length_prefixed(false).build().unwrap();
+    let storage = layer.storage.clone();
+    Registry::default().with(LevelFilter::TRACE).with(layer).init();
     info!("h");
 
     storage.finish().unwrap()

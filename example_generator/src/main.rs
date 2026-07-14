@@ -198,7 +198,8 @@ pub enum LogMode {
     #[default]
     DiskET,
     DiskIET,
-    StreamingET,
+    IETClient,
+    IETServer,
 }
 #[derive(Parser)]
 #[command(name = "entrace_graph_example")]
@@ -216,7 +217,8 @@ fn setup_tracing(args: &Args) -> Box<dyn Any> {
         None => match args.log_mode {
             LogMode::DiskET => "log.et",
             LogMode::DiskIET => "log.iet",
-            LogMode::StreamingET => "localhost:8000",
+            LogMode::IETClient => "localhost:8000",
+            LogMode::IETServer => "localhost:8000",
         },
     };
 
@@ -231,8 +233,13 @@ fn setup_tracing(args: &Args) -> Box<dyn Any> {
             Registry::default().with(LevelFilter::TRACE).with(layer).init();
             Box::new(guard)
         }
-        LogMode::StreamingET => {
+        LogMode::IETClient => {
             let (layer, guard) = IETBuilder::connect(log_filename).unwrap().build().unwrap();
+            Registry::default().with(LevelFilter::TRACE).with(layer).init();
+            Box::new(guard)
+        }
+        LogMode::IETServer => {
+            let (layer, guard) = IETBuilder::serve(log_filename).unwrap().build().unwrap();
             Registry::default().with(LevelFilter::TRACE).with(layer).init();
             Box::new(guard)
         }

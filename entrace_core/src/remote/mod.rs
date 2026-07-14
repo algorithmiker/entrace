@@ -16,15 +16,18 @@ pub use remote_log_provider::*;
 
 pub enum IETInfo {
     ServerStarted,
+    ConnectedToServer,
     ReceivedConnection,
     RemoteClosedConnection,
 }
 impl Display for IETInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use IETInfo::*;
         match self {
-            IETInfo::ServerStarted => write!(f, "Server started, waiting for connections"),
-            IETInfo::ReceivedConnection => write!(f, "Received connection"),
-            IETInfo::RemoteClosedConnection => write!(f, "Remote client closed connection"),
+            ServerStarted => write!(f, "Server started, waiting for connections"),
+            ConnectedToServer => write!(f, "Connected to server successfully"),
+            ReceivedConnection => write!(f, "Received connection"),
+            RemoteClosedConnection => write!(f, "Remote client closed connection"),
         }
     }
 }

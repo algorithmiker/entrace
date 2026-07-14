@@ -62,7 +62,7 @@ impl Default for App {
     fn default() -> Self {
         Self {
             file_picker_state: FilePickerState::NoPick,
-            connect_dialog: ConnectionDialog::not_open(),
+            connect_dialog: ConnectionDialog::default(),
             notifier: NotificationHandle::default(),
             self_tracing_state: SelfTracingState::default(),
             frame_time_tracker: FrameTimeTracker::Dummy,
@@ -90,6 +90,10 @@ impl App {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
         cc.egui_ctx.options_mut(|x| x.fallback_theme = Theme::Light);
+        cc.egui_ctx.all_styles_mut(|style| {
+            let small = style.text_styles.get_mut(&egui::TextStyle::Small).unwrap();
+            small.size = 11.0; // 9.0 by default when writing
+        });
         cc.egui_ctx.style_mut_of(Theme::Light, |style| {
             style.visuals.window_stroke = Stroke::new(0.5, Color32::BLACK);
             style.visuals.panel_fill = Color32::WHITE;

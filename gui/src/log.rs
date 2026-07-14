@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use crossbeam::channel::Receiver;
 use entrace::{
     LogProvider, LogProviderImpl, display_error_context,
     remote::{IETEvent, Notify, NotifyExt},
@@ -44,9 +45,20 @@ pub struct LogState {
     pub meta_open: EnBitVec,
     pub locating_state: RefCell<LocatingState>,
     pub tree_view: TreeView,
-    pub event_rx: Option<crossbeam::channel::Receiver<IETEvent>>,
+    pub event_rx: Option<Receiver<IETEvent>>,
 }
 impl LogState {
+    pub fn from_log_provider(file_path: PathBuf, log: LogProviderImpl) -> Self {
+        LogState {
+            file_path,
+            trace_provider: Arc::new(RwLock::new(log)),
+            is_open: EnBitVec::repeat(false, 1),
+            meta_open: EnBitVec::repeat(false, 1),
+            locating_state: RefCell::new(LocatingState::None),
+            tree_view: TreeView::new(),
+            event_rx: None,
+        }
+    }
     pub fn update_tree<const N: u8>(&mut self, tree_benchmark: &mut SamplingBenchmark<N>) {
         let locating_writer = self.locating_state.get_mut();
 

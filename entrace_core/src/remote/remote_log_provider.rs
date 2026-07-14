@@ -21,6 +21,7 @@ enum ReadState {
     WantMessage,
 }
 
+/// Assumes a content-length-prefixed encoding.
 struct RemoteWorkerState<'a, R: Refresh> {
     event_tx: Option<crossbeam_channel::Sender<IETEvent>>,
     refresher: R,
@@ -33,13 +34,13 @@ struct RemoteWorkerState<'a, R: Refresh> {
 impl<'a, R: Refresh> RemoteWorkerState<'a, R> {
     pub fn new(
         event_tx: Option<crossbeam_channel::Sender<IETEvent>>, refresher: R,
-        reader: BufReader<&'a mut TcpStream>, tx: Sender<MainThreadMessage>, read_state: ReadState,
+        reader: BufReader<&'a mut TcpStream>, tx: Sender<MainThreadMessage>,
     ) -> RemoteWorkerState<'a, R> {
         Self {
             refresher,
             reader,
             tx,
-            read_state,
+            read_state: ReadState::WantMagic,
             event_buf: Vec::with_capacity(512),
             byte_buf: Vec::with_capacity(1024),
             event_tx,
@@ -76,14 +77,10 @@ impl<'a, R: Refresh> RemoteWorkerState<'a, R> {
         self.set_short_timeout()
     }
     pub fn info(&self, i: IETInfo) {
-        if let Some(x) = &self.event_tx {
-            x.send(IETEvent::Info(i)).ok();
-        }
+        self.event_tx.as_ref().and_then(|x| x.send(IETEvent::Info(i)).ok());
     }
     pub fn err(&self, e: LogProviderError) {
-        if let Some(x) = &self.event_tx {
-            x.send(IETEvent::Error(e)).ok();
-        }
+        self.event_tx.as_ref().and_then(|x| x.send(IETEvent::Error(e)).ok());
     }
     pub fn read_loop_body(&mut self) -> ControlFlow<Option<LogProviderError>> {
         let cfg = bincode::config::standard();
@@ -101,13 +98,13 @@ impl<'a, R: Refresh> RemoteWorkerState<'a, R> {
                 let mut cl_buf = [0; 8];
                 if let Err(y) = self.reader.read_exact(&mut cl_buf) {
                     use std::io::ErrorKind::*;
-                    if matches!(y.kind(), WouldBlock | TimedOut) {
+                    if let WouldBlock | TimedOut = y.kind() {
                         self.send_event_buf();
                         if let Err(y) = self.block_on_data() {
                             self.err(y);
                         }
                         return ControlFlow::Continue(());
-                    } else if matches!(y.kind(), UnexpectedEof) {
+                    } else if let UnexpectedEof = y.kind() {
                         self.info(IETInfo::RemoteClosedConnection);
                         self.send_event_buf();
                         self.refresher.refresh();
@@ -153,27 +150,67 @@ pub enum RemoteLogProviderError {
 /// Provides a [crate::log_provider::LogProvider] based on incoming data from a TCP stream.
 pub struct RemoteLogProvider(BaseIETLogProvider);
 impl RemoteLogProvider {
+    fn reader_worker_main<R: Refresh + Send + 'static>(
+        config: IETPresentationConfig<R>, mut stream: TcpStream, tx: Sender<MainThreadMessage>,
+    ) {
+        let IETPresentationConfig { refresher, event_tx } = config;
+
+        let reader = BufReader::new(&mut stream);
+        let mut state = RemoteWorkerState::new(event_tx, refresher, reader, tx);
+        if let Err(y) = state.set_short_timeout() {
+            state.err(y);
+        }
+        loop {
+            match state.read_loop_body() {
+                ControlFlow::Continue(_) => (),
+                ControlFlow::Break(Some(y)) => {
+                    state.err(y);
+                    break;
+                }
+                ControlFlow::Break(None) => break,
+            }
+        }
+    }
+
+    /// Create a [RemoteLogProvider] in client mode, where the traced program is the server.
+    ///
+    /// See also [Self::new] for server mode (traced program is client).
+    pub fn connect<R: Refresh + Send + 'static>(
+        addr: &str, config: IETPresentationConfig<R>,
+    ) -> Self {
+        let addr = addr.to_owned();
+        let worker = move |_, tx: Sender<MainThreadMessage>, config: IETPresentationConfig<R>| {
+            let info = |i| config.event_tx.as_ref().and_then(|q| q.send(IETEvent::Info(i)).ok());
+            let err = |e| config.event_tx.as_ref().and_then(|q| q.send(IETEvent::Error(e)).ok());
+            match std::net::TcpStream::connect(&addr) {
+                Ok(stream) => {
+                    info(IETInfo::ConnectedToServer);
+                    Self::reader_worker_main(config, stream, tx);
+                }
+                Err(y) => {
+                    err(y.into());
+                }
+            }
+        };
+        Self(BaseIETLogProvider::new((), config, worker))
+    }
+
+    /// Create a [RemoteLogProvider] in server mode, where the traced program is the client.
+    ///
+    /// See also [Self::connect] for client mode (traced program is server).
     pub fn new<R: Refresh + Send + 'static>(
         listener: TcpListener, config: IETPresentationConfig<R>,
     ) -> Self {
-        fn worker<R: Refresh + Send>(
+        fn worker<R: Refresh + Send + 'static>(
             listener: TcpListener, tx: Sender<MainThreadMessage>, config: IETPresentationConfig<R>,
         ) {
-            let IETPresentationConfig { refresher, event_tx } = config;
-            let info = |i| {
-                if let Some(q) = &event_tx {
-                    q.send(IETEvent::Info(i)).ok();
-                }
-            };
-            let err = |e| {
-                if let Some(q) = &event_tx {
-                    q.send(IETEvent::Error(e)).ok();
-                }
-            };
+            let IETPresentationConfig { refresher, event_tx } = &config;
+            let info = |i| event_tx.as_ref().and_then(|q| q.send(IETEvent::Info(i)).ok());
+            let err = |e| event_tx.as_ref().and_then(|q| q.send(IETEvent::Error(e)).ok());
 
             info(IETInfo::ServerStarted);
             // block until someone connects
-            let (mut stream, _socket) = match listener.accept() {
+            let (stream, _socket) = match listener.accept() {
                 Ok((stream, socket)) => (stream, socket),
                 Err(y) => {
                     err(RemoteLogProviderError::CannotAccept(y).into());
@@ -183,22 +220,7 @@ impl RemoteLogProvider {
             };
             info(IETInfo::ReceivedConnection);
             refresher.refresh();
-            let reader = BufReader::new(&mut stream);
-            let mut state =
-                RemoteWorkerState::new(event_tx, refresher, reader, tx, ReadState::WantMagic);
-            if let Err(y) = state.set_short_timeout() {
-                state.err(y);
-            }
-            loop {
-                match state.read_loop_body() {
-                    ControlFlow::Continue(_) => (),
-                    ControlFlow::Break(Some(y)) => {
-                        state.err(y);
-                        break;
-                    }
-                    ControlFlow::Break(None) => break,
-                }
-            }
+            RemoteLogProvider::reader_worker_main(config, stream, tx)
         }
         let base = BaseIETLogProvider::new(listener, config, worker);
         Self(base)
