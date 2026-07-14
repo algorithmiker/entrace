@@ -46,11 +46,11 @@ For more information, see [file-formats.md](./docs/file-formats.md)
 
 ## Usage
 ### Using the library
-`entrace_core` provides a plug-and-play layer for `tracing_subscriber`.
+`entrace` provides a plug-and-play layer for `tracing_subscriber`.
 Short example:
 
 ```rust
-use entrace_core::IETBuilder;
+use entrace::IETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -64,7 +64,7 @@ fn main() {
 
 Or, for tracing in the ET format:
 ```rust
-use entrace_core::ETBuilder;
+use entrace::ETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -78,7 +78,7 @@ fn main() {
 
 Or, for remote tracing:
 ```rust,ignore
-use entrace_core::ETBuilder;
+use entrace::ETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -89,7 +89,7 @@ fn main() {
     info!(target = "World", "Hello");
 }
 ```
-For more information, consult the [entrace_core docs](./docs/usage-library.md).
+For more information, consult the [entrace docs](./docs/usage-library.md).
 
 ### Using the GUI
 Consult [usage-gui.md](./docs/usage-gui.md)
@@ -120,13 +120,13 @@ After restarting ENTRACE, the current, live trace of the running application can
 ## Performance
 ENTRACE was designed with performance in mind, but did not receive much manual optimization yet.
 
-- The `entrace_core` library should not slow your program down by any noticable amount in reasonable scenarios.
+- The `entrace` library should not slow your program down by any noticable amount in reasonable scenarios.
 By non-scientific experimentation, writing entrace traces is much faster than using `tracing_subscriber`'s JSON output with span tracking enabled, and a file appender, as the file format is more compact and less redundant.
 - The GUI should be reasonably performant too. When simply viewing traces, it is not uncommon to encounter sub-100-us frame times (10 000+ FPS); although it is possible to construct traces and queries on which the various lazy renderers struggle.
 
 ## Maintenance
 ### Supported platforms
-The `entrace_core` library will work on any platform supported by the Rust standard library.
+The `entrace` library will work on any platform supported by the Rust standard library.
 
 The **GUI is primarily supported on Linux** based targets. It supports Windows and MacOS too in theory, but the user experience might be degraded (for example, the GUI assumes threads are very cheap to spawn, which is not true on Windows).
 

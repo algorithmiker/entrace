@@ -16,11 +16,11 @@
 To start recording traces with entrace, you first need to add [tracing_subscriber] to your
 dependencies.
 
-`entrace_core` provides a [TreeLayer], which is a [tracing_subscriber::Layer].
+`entrace` provides a [TreeLayer], which is a [tracing_subscriber::Layer].
 
 ### Producing IET files
  ```rust
-use entrace_core::IETBuilder;
+use entrace::IETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -34,7 +34,7 @@ fn main() {
 
 ### Producing ET files
  ```rust
-use entrace_core::ETBuilder;
+use entrace::ETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -48,7 +48,7 @@ fn main() {
 
 ### Remote tracing
  ```rust,ignore
-use entrace_core::IETBuilder;
+use entrace::IETBuilder;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -79,7 +79,7 @@ A nicer formatter for `tracing_subscriber` is included in [crate::en_formatter].
 Usage:
 
 ```rust
-use entrace_core::en_formatter::EnFormatter;
+use entrace::en_formatter::EnFormatter;
 use tracing::{level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 let printing_layer =

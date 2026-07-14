@@ -182,7 +182,9 @@ pub enum LoadTraceError {
     #[cfg(feature = "mmap")]
     #[error("Failed to create ET log provider")]
     MmapError(#[from] mmap::MmapError),
-    #[error("Tried to load an ET file, but you didn't enable the mmap feature for entrace_core")]
+    #[error(
+        "Tried to load an ET file, but this build of entrace was compiled without the mmap feature"
+    )]
     MmapNeeded,
     #[error("Failed to create IET log provider")]
     IETError(#[from] LoadIETError),

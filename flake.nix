@@ -60,7 +60,7 @@
           craneWithCommonArgs =
             x: craneLib.buildPackage (craneCommonArgs // { inherit cargoArtifacts; } // x);
           entraceApp = craneWithCommonArgs {
-            pname = "entrace";
+            pname = "entrace_gui";
             cargoExtraArgs = "-p entrace_gui";
             postFixup = ''
               ENTRACE_BIN="$out/bin/entrace"
@@ -78,12 +78,12 @@
           default = entraceApp;
           entrace = entraceApp;
           entrace_core = craneWithCommonArgs {
-            pname = "entrace_core";
-            cargoExtraArgs = "-p entrace_core";
+            pname = "entrace";
+            cargoExtraArgs = "-p entrace";
           };
           entrace_core_lite = craneWithCommonArgs {
             pname = "entrace_core_lite";
-            cargoExtraArgs = "-p entrace_core --no-default-features";
+            cargoExtraArgs = "-p entrace --no-default-features";
           };
           entrace_script = craneWithCommonArgs {
             pname = "entrace-script";

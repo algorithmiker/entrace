@@ -5,8 +5,6 @@
 	-	partial update on opens/closes
 - Query
 	- "virtual span" for aggregate data
-- Cli
-	- convert traces via CLI (especially to JSON)
 
 - tests
 	- test IHT roundtrip with and without length prefix
@@ -17,10 +15,8 @@
 
 - LOW PRIO
 	- toolbars for backends (idea: API for backend to add menu item AND/OR dialog via Tools->Remote, Tools->HT, Tools->IHT.)
-	- tab/window system
 	- low prio: benchmark channel::bounded(1) vs RwLock<Option> and similar
 	- HT backend: GC (safe) mode
-	- HT Backend: option to have the backend itself swap the out and temporary buffers (low prio)
 	- split out entrace_extras for LogProviders
 	- remote (IHT) backend
 		- maybe: Lock-based mode (very low prio)
@@ -28,6 +24,9 @@
 		- highlight new items (very low prio)
 	
 - DONE
+	- HT Backend: option to have the backend itself swap the out and temporary buffers (low prio)
+	- tab/window system
+	- convert traces via CLI (especially to JSON)
 	- new entrace_cli command
 		- provide a Lua environment with the standard query api
 	- gate entrace_core dependencies behind features

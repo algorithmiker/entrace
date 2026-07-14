@@ -31,8 +31,6 @@ pub enum LoadIETError {
     LengthMismatch { data_len: usize, pool_len: usize },
     #[error(transparent)]
     IO(#[from] std::io::Error),
-    #[error("Want to watch a file, but you didn't enable the notify-watch feature in entrace_core")]
-    NotifyNeeded,
 }
 
 pub struct InitialIETData {
@@ -152,7 +150,7 @@ impl FileIETLogProvider {
 }
 #[derive(thiserror::Error, Debug)]
 pub enum FileIETError {
-    #[error("Wanted to watch a file, but the notify-watch feature of entrace_core is not enabled")]
+    #[error("Want to watch a file, but entrace was compiled without the notify-watch feature")]
     NeedNotify,
     #[cfg(feature = "notify-watch")]
     #[error(transparent)]

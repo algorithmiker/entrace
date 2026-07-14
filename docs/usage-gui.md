@@ -16,7 +16,7 @@ Open the convert dialog from the menu by `Tools` -> `Convert`.
 Filtering traces is perhaps the primary function of the ENTRACE system.
 The ENTRACE GUI provides a convenient way to accomplish this task.
 
-It is important to note that the current query system is provided by the GUI, not `entrace_core`, for more flexibility, but this may change in the future.
+It is important to note that the current query system is provided by the GUI, not `entrace`, for more flexibility, but this may change in the future.
 
 ### Anatomy of a query
 Instead of a custom Domain-Specific Language, ENTRACE provides **a Lua-based API** for querying traces.

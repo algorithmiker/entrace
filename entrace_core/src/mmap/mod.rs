@@ -8,7 +8,7 @@
 // - store an immediate IET trace on disk.
 // - no memory mapping when writing
 //   a) tracing data is valuable, and we don't want to lose it
-//   b) we don't want to create potential UB for the entrace_core consumer (for example, if you
+//   b) we don't want to create potential UB for the entrace consumer (for example, if you
 //   opened an mmap file in entrace while the traced process was writing it, that'd already be UB)
 // - encode new spans one by one after each other.
 // - on shutdown, we have to copy the entire file over, but that is an one time thing.
