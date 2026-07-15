@@ -8,7 +8,7 @@ use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt
 fn remote_server() {
     let builder = IETBuilder::serve("localhost:0").unwrap();
     let addr = builder.listener.local_addr().unwrap();
-    println!("Started server on {}", addr);
+    println!("Started server on {addr}");
     let (layer, guard) = builder.build().unwrap();
 
     Registry::default().with(LevelFilter::TRACE).with(layer).init();

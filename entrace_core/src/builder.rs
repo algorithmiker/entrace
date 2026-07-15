@@ -2,7 +2,7 @@ use std::{
     fmt,
     fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -85,7 +85,7 @@ impl IETBuilder<TcpStream> {
     /// (this'll, of course, increase message latency dramatically).
     ///
     /// This'll enable length-prefixed mode automatically.
-    pub fn connect(addr: &str) -> std::io::Result<Self> {
+    pub fn connect(addr: impl ToSocketAddrs) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
         Ok(Self::new(stream).length_prefixed(true))
     }
