@@ -11,7 +11,7 @@ fn get_hello_iet() -> Vec<u8> {
     Registry::default().with(LevelFilter::TRACE).with(layer).init();
     info!("h");
 
-    storage.finish().unwrap()
+    storage.finish().unwrap().unwrap()
 }
 
 #[test]

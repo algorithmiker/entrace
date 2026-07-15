@@ -2,7 +2,13 @@ use std::{
     any::Any,
     collections::BTreeMap,
     io::{BufReader, BufWriter, Read, Seek, Write},
-    sync::RwLock,
+    sync::{
+        RwLock,
+        atomic::{
+            AtomicBool,
+            Ordering::{Acquire, Release},
+        },
+    },
     thread::JoinHandle,
 };
 
@@ -49,6 +55,7 @@ pub type ETResult<A, T> = Result<A, ETStorageError<T>>;
 pub struct ETStorage<Temp: FileLike, Final: FileLike + Send> {
     pub sender: crossbeam_channel::Sender<Message<Final>>,
     pub thread_handle: RwLock<Option<JoinHandle<ETResult<ETShutdownValue<Temp, Final>, Temp>>>>,
+    pub finished: AtomicBool,
 }
 impl<Temp: FileLike + Send + 'static, Final: FileLike + Send + 'static> ETStorage<Temp, Final> {
     pub fn init(mut temporary_buf: Temp) -> Self
@@ -124,17 +131,22 @@ impl<Temp: FileLike + Send + 'static, Final: FileLike + Send + 'static> ETStorag
             Ok(ETShutdownValue { final_buf: None, temp_iet_buf: None })
         });
 
-        Self { sender: tx, thread_handle: RwLock::new(Some(thread_handle)) }
+        Self { sender: tx, thread_handle: RwLock::new(Some(thread_handle)), finished: false.into() }
     }
 
     pub fn finish(
         &self, final_buf: Final,
-    ) -> Result<ETShutdownValue<Temp, Final>, ETStorageError<Temp>> {
+    ) -> Result<Option<ETShutdownValue<Temp, Final>>, ETStorageError<Temp>> {
         use ETStorageError::*;
+        if self.finished.load(Acquire) {
+            return Ok(None);
+        };
+
         self.sender.send(Message::Shutdown(final_buf)).map_err(|_| ShutdownSend)?;
         let mut thread_handle = self.thread_handle.write().map_err(|_| Poisoned)?;
         let thread_handle = std::mem::take(&mut *thread_handle).ok_or(NoHandle)?;
-        thread_handle.join().map_err(ThreadJoin)?
+        self.finished.store(true, Release);
+        Ok(Some(thread_handle.join().map_err(ThreadJoin)??))
     }
 }
 impl<T: FileLike + Send + 'static, Q: FileLike + Send + 'static> Storage for ETStorage<T, Q> {

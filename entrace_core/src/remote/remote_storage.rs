@@ -4,7 +4,18 @@ use crate::{
 };
 use crossbeam_channel::{Receiver, SendError, Sender};
 use std::{
-    any::Any, collections::BTreeMap, io::Write, net::TcpListener, sync::RwLock, thread::JoinHandle,
+    any::Any,
+    collections::BTreeMap,
+    io::Write,
+    net::TcpListener,
+    sync::{
+        RwLock,
+        atomic::{
+            AtomicBool,
+            Ordering::{Acquire, Release},
+        },
+    },
+    thread::JoinHandle,
 };
 
 pub enum RemoteMessage {
@@ -28,6 +39,7 @@ pub enum IETStorageError {
 pub struct IETStorage<T> {
     pub sender: Sender<RemoteMessage>,
     pub thread_handle: RwLock<Option<JoinHandle<T>>>,
+    pub finished: AtomicBool,
 }
 
 impl<T: Write + Send + 'static> IETStorage<T> {
@@ -35,7 +47,11 @@ impl<T: Write + Send + 'static> IETStorage<T> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let thread_handle =
             std::thread::spawn(move || Self::writer_thread_main(writable, length_prefixed, rx));
-        IETStorage { sender: tx, thread_handle: RwLock::new(Some(thread_handle)) }
+        IETStorage {
+            sender: tx,
+            thread_handle: RwLock::new(Some(thread_handle)),
+            finished: false.into(),
+        }
     }
 
     fn writer_thread_main(
@@ -88,12 +104,18 @@ impl<T: Write + Send + 'static> IETStorage<T> {
     }
 }
 impl<T> IETStorage<T> {
-    pub fn finish(&self) -> Result<T, IETStorageError> {
+    /// returns None if already finished
+    pub fn finish(&self) -> Result<Option<T>, IETStorageError> {
+        if self.finished.load(Acquire) {
+            return Ok(None);
+        }
+
         self.sender.send(RemoteMessage::Shutdown).map_err(Box::new)?;
         let mut thread_handle =
             self.thread_handle.write().map_err(|_| IETStorageError::Poisoned)?;
         let thread_handle = std::mem::take(&mut *thread_handle).ok_or(IETStorageError::NoHandle)?;
-        thread_handle.join().map_err(IETStorageError::ThreadJoin)
+        self.finished.store(true, Release);
+        Ok(Some(thread_handle.join().map_err(IETStorageError::ThreadJoin)?))
     }
 }
 impl IETStorage<std::net::TcpStream> {
@@ -103,7 +125,11 @@ impl IETStorage<std::net::TcpStream> {
             let (stream, _) = listener.accept().expect("IETStorage: Failed to accept stream");
             Self::writer_thread_main(stream, length_prefixed, rx)
         });
-        IETStorage { sender: tx, thread_handle: RwLock::new(Some(thread_handle)) }
+        IETStorage {
+            sender: tx,
+            thread_handle: RwLock::new(Some(thread_handle)),
+            finished: false.into(),
+        }
     }
 }
 impl<T: Write + Send + 'static> Storage for IETStorage<T> {
