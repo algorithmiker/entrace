@@ -142,8 +142,8 @@ where
 ///
 /// Created by [IETBuilder::server]
 pub struct IETServerBuilder {
-    listener: TcpListener,
-    length_prefixed: bool,
+    pub listener: TcpListener,
+    pub length_prefixed: bool,
 }
 impl IETServerBuilder {
     /// Set length-prefixed mode (recommended for remote tracing)

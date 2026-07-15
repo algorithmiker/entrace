@@ -2,6 +2,7 @@ use crate::TraceEntry;
 use crate::remote::IETInfo;
 use crate::tree_layer::EnValueRef;
 use crate::{LogProviderError, remote::IETEvent};
+use std::net::ToSocketAddrs;
 use std::{
     io::{BufRead, BufReader, Read},
     net::{TcpListener, TcpStream},
@@ -176,9 +177,8 @@ impl RemoteLogProvider {
     ///
     /// See also [Self::new] for server mode (traced program is client).
     pub fn connect<R: Refresh + Send + 'static>(
-        addr: &str, config: IETPresentationConfig<R>,
+        addr: impl ToSocketAddrs + 'static + Send, config: IETPresentationConfig<R>,
     ) -> Self {
-        let addr = addr.to_owned();
         let worker = move |_, tx: Sender<MainThreadMessage>, config: IETPresentationConfig<R>| {
             let info = |i| config.event_tx.as_ref().and_then(|q| q.send(IETEvent::Info(i)).ok());
             let err = |e| config.event_tx.as_ref().and_then(|q| q.send(IETEvent::Error(e)).ok());

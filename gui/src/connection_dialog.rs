@@ -51,7 +51,7 @@ impl ConnectionDialog {
     ) -> RemoteLogProvider {
         let ctx = context.clone();
         let iht_config = IETPresentationConfig { refresher: RefreshToken(ctx), event_tx };
-        RemoteLogProvider::connect(&self.connect_url, iht_config)
+        RemoteLogProvider::connect(self.connect_url.to_string(), iht_config)
     }
 }
 
