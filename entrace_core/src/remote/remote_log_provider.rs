@@ -245,7 +245,7 @@ impl LogProvider for RemoteLogProvider {
     dispatch_to_parent!(fn meta(x: u32) -> LogProviderResult<MetadataRefContainer<'_>>);
     dispatch_to_parent!(fn len()-> usize);
 
-    fn frame_callback(&mut self) {
-        self.0.frame_callback();
+    fn run_event_loop(&mut self) {
+        self.0.run_event_loop();
     }
 }

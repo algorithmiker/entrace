@@ -119,7 +119,7 @@ impl LogProvider for BaseIETLogProvider {
         Ok(self.data_get(idx)?.metadata.as_ref())
     }
 
-    fn frame_callback(&mut self) {
+    fn run_event_loop(&mut self) {
         // TODO: make configurable ( maybe an interface for Storage to provide extra settings in
         // the dialog ? )
         #[allow(non_snake_case)]

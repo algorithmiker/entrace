@@ -99,7 +99,7 @@ impl LogState {
         let mut delta = 0;
         if let Ok(mut q) = self.trace_provider.try_write() {
             let len0 = q.len();
-            q.frame_callback();
+            q.run_event_loop();
             delta = q.len().saturating_sub(len0);
         } else {
             trace!(

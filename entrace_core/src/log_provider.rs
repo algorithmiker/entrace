@@ -55,12 +55,13 @@ pub trait LogProvider {
     /// This MUST be cheap as the frontend might call this every frame.
     fn len(&self) -> usize;
 
-    /// The frontent SHOULD call this at the beginning of each painted frame,
-    /// but there is no guarantee to whether or when it will.
+    /// Give the LogProvider a chance to do some work.
+    /// The frontent SHOULD call this as often as it's convenient for it to do so,
+    /// eg. integrated into its own event loop, but there is no guarantee to whether or when it will.
+    ///
     /// This runs on the main thread.
-    /// The [LogProvider] implementation MUST ensure that this terminates quickly,
-    /// as it directly affects FPS.
-    fn frame_callback(&mut self) {}
+    /// The [LogProvider] implementation MUST ensure that this terminates quickly.
+    fn run_event_loop(&mut self) {}
 }
 
 pub enum LogProviderImpl {
@@ -95,13 +96,13 @@ impl LogProvider for LogProviderImpl {
     dispatch!(fn meta(x: u32)-> LogProviderResult<MetadataRefContainer<'_>>);
     dispatch!(fn len()-> usize);
 
-    fn frame_callback(&mut self) {
+    fn run_event_loop(&mut self) {
         match self {
             #[cfg(feature = "mmap")]
-            Self::Mmap(inner) => inner.frame_callback(),
-            Self::BaseIET(inner) => inner.frame_callback(),
-            Self::FileIET(inner) => inner.frame_callback(),
-            Self::Remote(inner) => inner.frame_callback(),
+            Self::Mmap(inner) => inner.run_event_loop(),
+            Self::BaseIET(inner) => inner.run_event_loop(),
+            Self::FileIET(inner) => inner.run_event_loop(),
+            Self::Remote(inner) => inner.run_event_loop(),
         }
     }
 }
