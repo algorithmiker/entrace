@@ -4,8 +4,8 @@ use bincode::config::Configuration;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    EN_DISK_VERSION, EnValue, MagicParseError, MetadataContainer, PoolEntry, StorageFormat,
-    TraceEntry, entrace_magic_for, parse_entrace_magic,
+    EN_DISK_VERSION, EnValue, EnValueRef, MagicParseError, MetadataContainer, MetadataRefContainer,
+    PoolEntry, StorageFormat, TraceEntry, TraceEntryRef, entrace_magic_for, parse_entrace_magic,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -176,7 +176,7 @@ pub fn et_to_iet<W: Write, R: Read + Seek>(
     Ok(())
 }
 
-// Old trace entry, from version 1
+/// Old trace entry, from version 1
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct TraceEntry1 {
     pub parent: u32,
@@ -194,6 +194,22 @@ impl TraceEntry1 {
         TraceEntry::from_sorted_attrs(parent, message, metadata, attr_names, attr_values)
     }
 }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct TraceEntry1Ref<'a> {
+    pub parent: u32,
+    pub message: Option<&'a str>,
+    #[serde(borrow)]
+    pub metadata: MetadataRefContainer<'a>,
+    pub attributes: Vec<(&'a str, EnValueRef<'a>)>,
+}
+impl<'a> TraceEntry1Ref<'a> {
+    pub fn into_trace_entry_ref(self) -> TraceEntryRef<'a> {
+        let TraceEntry1Ref { parent, message, metadata, attributes } = self;
+        let (attr_names, attr_values) = attributes.into_iter().unzip();
+        TraceEntryRef::from_unsorted_attrs(parent, message, metadata, attr_names, attr_values)
+    }
+}
+
 /// Convert a version 1 et file to a version 2 (latest as of writing) format.
 /// It is the caller's responsibility to buffer IO, but temp SHOULD not be buffered
 /// (it'll be buffered internally, separately for read/write).
@@ -205,7 +221,7 @@ pub fn et_v1_to_v2<W: Write, R: Read + Seek, RW: Read + Write + Seek>(
     inp: &mut R, out: &mut W, temp: &mut RW, skip_validating_magic: bool,
 ) -> Result<(), ConvertError> {
     use ConvertError::*;
-    use bincode::serde::{decode_from_std_read, encode_into_std_write};
+    use bincode::serde::{borrow_decode_from_slice, decode_from_std_read, encode_into_std_write};
     const CFG: Configuration = bincode::config::standard();
 
     if !skip_validating_magic {
@@ -219,17 +235,32 @@ pub fn et_v1_to_v2<W: Write, R: Read + Seek, RW: Read + Write + Seek>(
         }
     }
 
-    let _inp_offsets: Vec<u64> = decode_from_std_read(inp, CFG)?;
+    let old_offsets: Vec<u64> = decode_from_std_read(inp, CFG)?;
     let child_lists: Vec<PoolEntry> = decode_from_std_read(inp, CFG)?;
 
     let mut temp_writer = BufWriter::new(temp);
     let mut new_offsets = vec![];
-    for _processed in 0..child_lists.len() {
+    let mut scratch = Vec::with_capacity(1024);
+    for i in 0..child_lists.len() {
         let offset = temp_writer.stream_position().map_err(ReadInputError)?;
         new_offsets.push(offset);
 
-        let entry1: TraceEntry1 = decode_from_std_read(inp, CFG)?;
-        encode_into_std_write(entry1.into_trace_entry_2(), &mut temp_writer, CFG)?;
+        // fast path: copy to a buffer, so we can decode into a reference type,
+        // skipping a bunch of allocations.
+        // of course this only applies if we know how long the data of this TraceEntry1 is
+        if i != child_lists.len() - 1 {
+            scratch.clear();
+            let start = old_offsets[i] as usize;
+            let end = old_offsets[i + 1] as usize;
+            scratch.resize(end - start, 0);
+            inp.read_exact(&mut scratch).map_err(ReadInputError)?;
+            let (entry1, _): (TraceEntry1Ref, _) = borrow_decode_from_slice(&scratch, CFG)?;
+            encode_into_std_write(entry1.into_trace_entry_ref(), &mut temp_writer, CFG)?;
+        } else {
+            // slow path for the last message
+            let entry1: TraceEntry1 = bincode::serde::decode_from_std_read(inp, CFG)?;
+            encode_into_std_write(entry1.into_trace_entry_2(), &mut temp_writer, CFG)?;
+        }
     }
     temp_writer.seek(std::io::SeekFrom::Start(0)).map_err(TempWriteError)?;
     let temp = temp_writer.into_inner().map_err(|x| TempWriteError(x.into_error()))?; // this will flush too

@@ -84,6 +84,15 @@ impl<'a> TraceEntryRef<'a> {
     ) -> Self {
         TraceEntryRef { parent, message, metadata, attr_names, attr_values, _sealed: () }
     }
+    pub fn from_unsorted_attrs(
+        parent: u32, message: Option<&'a str>, metadata: MetadataRefContainer<'a>,
+        mut attr_names: Vec<&'a str>, mut attr_values: Vec<EnValueRef<'a>>,
+    ) -> Self {
+        let mut pi = permutation::sort_unstable(&attr_names);
+        pi.apply_slice_in_place(&mut attr_names);
+        pi.apply_slice_in_place(&mut attr_values);
+        Self::from_sorted_attrs(parent, message, metadata, attr_names, attr_values)
+    }
     pub fn get_attr(&self, name: &str) -> Option<EnValueRef<'a>> {
         let name_idx = self.attr_names.binary_search(&name).ok()?;
         // this clone should be ok since EnValueRef only contains references
