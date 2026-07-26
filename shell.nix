@@ -31,6 +31,10 @@ pkgs.mkShell {
     pkgs.cargo-about
     nixpkgsOld.dioxus-cli
     pkgs.cargo-semver-checks
+    pkgs.cargo
+    pkgs.rust-analyzer
+    pkgs.rustc
+    pkgs.clippy
   ];
   preferLocalBuild = true;
   env.RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
