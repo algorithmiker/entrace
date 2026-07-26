@@ -241,9 +241,9 @@ pub fn et_v1_to_v2<W: Write, R: Read + Seek, RW: Read + Write + Seek>(
     let mut temp_writer = BufWriter::new(temp);
     let mut new_offsets = vec![];
     let mut scratch = Vec::with_capacity(1024);
+    let mut written = 0;
     for i in 0..child_lists.len() {
-        let offset = temp_writer.stream_position().map_err(ReadInputError)?;
-        new_offsets.push(offset);
+        new_offsets.push(written);
 
         // fast path: copy to a buffer, so we can decode into a reference type,
         // skipping a bunch of allocations.
@@ -255,11 +255,11 @@ pub fn et_v1_to_v2<W: Write, R: Read + Seek, RW: Read + Write + Seek>(
             scratch.resize(end - start, 0);
             inp.read_exact(&mut scratch).map_err(ReadInputError)?;
             let (entry1, _): (TraceEntry1Ref, _) = borrow_decode_from_slice(&scratch, CFG)?;
-            encode_into_std_write(entry1.into_trace_entry_ref(), &mut temp_writer, CFG)?;
+            written += encode_into_std_write(entry1.into_trace_entry_ref(), &mut temp_writer, CFG)?;
         } else {
             // slow path for the last message
             let entry1: TraceEntry1 = bincode::serde::decode_from_std_read(inp, CFG)?;
-            encode_into_std_write(entry1.into_trace_entry_2(), &mut temp_writer, CFG)?;
+            written += encode_into_std_write(entry1.into_trace_entry_2(), &mut temp_writer, CFG)?;
         }
     }
     temp_writer.seek(std::io::SeekFrom::Start(0)).map_err(TempWriteError)?;
